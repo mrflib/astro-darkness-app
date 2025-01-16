@@ -451,8 +451,9 @@ def main():
 
                 cS, cW = st.columns(2)
                 with cS:
-                    st.markdown(f"**SQM**: {sqm_val:.2f} mag/arcsec²  
-**Bortle**: {bortle_val}")
+st.markdown(f"**SQM**: {sqm_val:.2f} mag/arcsec²  \n"
+            f"**Bortle**: {bortle_val}")
+
                 
                 with cW:
                     if climate_info:
