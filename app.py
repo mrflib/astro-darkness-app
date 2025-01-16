@@ -224,10 +224,10 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         m_set_str = "-"
         prev_alt = moon_alts[0]
         for i in range(1, len(moon_alts)):
-            if prev_alt<0 and moon_alts[i]>=0 and m_rise_str=="-":
+            if prev_alt < 0 and moon_alts[i] >= 0 and m_rise_str == "-":
                 dt_loc = times_list[i].utc_datetime().astimezone(local_tz)
                 m_rise_str = dt_loc.strftime("%H:%M")
-            if prev_alt>=0 and moon_alts[i]<0 and m_set_str=="-":
+            if prev_alt >= 0 and moon_alts[i] < 0 and m_set_str == "-":
                 dt_loc = times_list[i].utc_datetime().astimezone(local_tz)
                 m_set_str = dt_loc.strftime("%H:%M")
             prev_alt = moon_alts[i]
@@ -254,7 +254,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         })
 
         current += timedelta(days=1)
-        day_count+=1
+        day_count += 1
 
     return day_results
 
@@ -301,16 +301,27 @@ def main():
 
     with row1_col2:
         st.subheader("Date Range")
+        # === Modified Date Selector Starts Here ===
         dvals = st.date_input(
             f"Pick up to {MAX_DAYS} days",
             [st.session_state["start_date"], st.session_state["end_date"]],
-            help="Select 1 or 2 dates. e.g. 2025-10-14 to 2025-10-19"
+            help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        if len(dvals)==1:
+        if len(dvals) == 1:
             st.session_state["start_date"] = dvals[0]
             st.session_state["end_date"] = dvals[0]
+        elif len(dvals) == 2:
+            start, end = dvals
+            delta_days = (end - start).days + 1
+            if delta_days > MAX_DAYS:
+                st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {start + timedelta(days=MAX_DAYS -1)}.")
+                st.session_state["start_date"] = start
+                st.session_state["end_date"] = start + timedelta(days=MAX_DAYS -1)
+            else:
+                st.session_state["start_date"], st.session_state["end_date"] = start, end
         else:
-            st.session_state["start_date"], st.session_state["end_date"] = dvals[0], dvals[-1]
+            st.warning("Please select either a single date or a valid date range.")
+        # === Modified Date Selector Ends Here ===
 
     # Row for lat/lon
     st.subheader("Lat/Lon")
@@ -322,7 +333,7 @@ def main():
             format="%.6f",
             help="Latitude in decimal degrees (e.g. 51.5074 for London)."
         )
-        if abs(lat_in - st.session_state["lat"])>1e-8:
+        if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
 
     with row2_col2:
@@ -332,7 +343,7 @@ def main():
             format="%.6f",
             help="Longitude in decimal degrees (e.g. -0.1278 for London)."
         )
-        if abs(lon_in - st.session_state["lon"])>1e-8:
+        if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
 
     # No Moon
@@ -367,13 +378,13 @@ def main():
 
     # Check day range
     delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
-    if delta_days>MAX_DAYS:
+    if delta_days > MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         return
 
     # Calculate
     if st.button("Calculate"):
-        if st.session_state["start_date"]> st.session_state["end_date"]:
+        if st.session_state["start_date"] > st.session_state["end_date"]:
             st.error("Start date must be <= end date.")
             return
 
