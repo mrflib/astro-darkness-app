@@ -1,5 +1,5 @@
 # app.py - Full code with line references
-# ----------------------------------------------------------------
+# --------------------------------------------------
 
 # (1) Imports
 import streamlit as st                             # line 1
@@ -10,9 +10,6 @@ import pandas as pd                                # line 5
 from skyfield.api import load, Topos               # line 6
 from skyfield.searchlib import find_discrete       # line 7
 from geopy.geocoders import Nominatim              # line 8
-import requests                                    # line 9
-import folium                                      # line 10
-from streamlit_folium import st_folium            # line 11
 
 # (2) Page config
 st.set_page_config(                                # line 15
@@ -23,26 +20,12 @@ st.set_page_config(                                # line 15
 
 # (3) Intro text
 st.title("Astronomical Darkness Calculator")       # line 23
-st.write(                                          # line 24
-    "Find how many hours of astro darkness you get in a given location "
-    "for up to a one-week period, and how many of those hours include "
-    "the Moon being up. Great for holiday planning!"
+st.write(
+    "Debug version: 3-day limit, bigger step_days=1.0, with debug prints!"
 )
 
-# (4) Utility: IP location
-def get_ip_location():                             # line 31
-    """Approx user location via ipapi.co."""
-    try:
-        r = requests.get("https://ipapi.co/json/")
-        if r.status_code == 200:
-            data = r.json()
-            return (data.get("latitude"), data.get("longitude"))
-    except:
-        pass
-    return (None, None)
-
-# (5) Utility: geocode city
-def geocode_place(place_name):                     # line 42
+# (4) Utility: geocode city
+def geocode_place(place_name):                     # line 31
     geolocator = Nominatim(user_agent="astro_app")
     try:
         loc = geolocator.geocode(place_name)
@@ -52,8 +35,8 @@ def geocode_place(place_name):                     # line 42
         pass
     return None
 
-# (6) Utility: reverse geocode lat/lon -> city name
-def reverse_geocode(lat, lon):                     # line 52
+# (5) Utility: reverse geocode lat/lon -> city name
+def reverse_geocode(lat, lon):                     # line 41
     geolocator = Nominatim(user_agent="astro_app")
     try:
         loc = geolocator.reverse((lat, lon), language='en')
@@ -70,8 +53,8 @@ def reverse_geocode(lat, lon):                     # line 52
         pass
     return ""
 
-# (7) Moon phase icon
-def moon_phase_icon(phase_deg):                    # line 63
+# (6) Moon phase icon
+def moon_phase_icon(phase_deg):                    # line 57
     x = phase_deg % 360
     if x < 22.5 or x >= 337.5:
         return "🌑"
@@ -90,45 +73,44 @@ def moon_phase_icon(phase_deg):                    # line 63
     else:
         return "🌘"
 
-# (8) Cached day-details function using find_discrete, limit to 7 days
-@st.cache_data                                     # line 82
+# (7) Cached day-details function, up to 3 days, with debug prints
+@st.cache_data                                     # line 73
 def compute_day_details(lat, lon, start_date, end_date, no_moon):
-    """
-    Day-by-day astro dark times using Skyfield with find_discrete,
-    up to 7 days (reduced from 14 to avoid timeouts).
-    """
-    # (8a) Setup
-    max_days = 7                                   # line 89
+    st.write("DEBUG: Entering compute_day_details...")
     ts = load.timescale()
     eph = load('de421.bsp')
+    st.write("DEBUG: Loaded timescale & ephemeris")
 
+    max_days = 3  # limit to 3 days
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
         tz_name = "UTC"
     local_tz = pytz.timezone(tz_name)
+    st.write(f"DEBUG: local_tz = {tz_name}")
+
+    # altitude functions with step_days
+    def sun_alt_func(t):
+        topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
+        observer = eph['Earth'] + topos
+        alt, _, _ = observer.at(t).observe(eph['Sun']).apparent().altaz()
+        return alt.degrees - (-18.0)
+    sun_alt_func.step_days = 1.0  # bigger step => fewer computations
+
+    def moon_alt_func(t):
+        topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
+        observer = eph['Earth'] + topos
+        alt, _, _ = observer.at(t).observe(eph['Moon']).apparent().altaz()
+        return alt.degrees
+    moon_alt_func.step_days = 1.0
 
     day_results = []
     day_count = 0
     current = start_date
 
-    # We'll define altitude functions with .step_days
-    def sun_alt_func(t):                           # line 102
-        topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
-        observer = eph['Earth'] + topos
-        alt, _, _ = observer.at(t).observe(eph['Sun']).apparent().altaz()
-        return alt.degrees - (-18.0)  # crossing 0 => altitude == -18
-    sun_alt_func.step_days = 0.5                   # line 108
-
-    def moon_alt_func(t):                          # line 110
-        topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
-        observer = eph['Earth'] + topos
-        alt, _, _ = observer.at(t).observe(eph['Moon']).apparent().altaz()
-        return alt.degrees  # crossing 0 => horizon
-    moon_alt_func.step_days = 0.5                  # line 115
-
     while current <= end_date and day_count < max_days:
-        # local midnight -> next midnight
+        st.write(f"DEBUG: Starting day {day_count}, date={current}")
+        # local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
 
@@ -136,17 +118,16 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         end_aware = local_tz.localize(local_next)
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
-
         t_start = ts.from_datetime(start_utc)
         t_end = ts.from_datetime(end_utc)
 
-        # Sun crossing -18
+        st.write("DEBUG: About to call find_discrete for Sun")
         sun_times, sun_values = find_discrete(t_start, t_end, sun_alt_func)
-        # negative => alt < -18, positive => alt > -18
+        st.write(f"DEBUG: sun_times len = {len(sun_times)}")
 
-        # Moon crossing 0
+        st.write("DEBUG: About to call find_discrete for Moon")
         moon_times, moon_values = find_discrete(t_start, t_end, moon_alt_func)
-        # negative => below horizon, positive => above horizon
+        st.write(f"DEBUG: moon_times len = {len(moon_times)}")
 
         # Summation of astro darkness
         combined_sun = [t_start] + list(sun_times) + [t_end]
@@ -156,26 +137,24 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
             seg_b = combined_sun[i+1]
             mid_t = seg_a.tt + 0.5*(seg_b.tt - seg_a.tt)
             mid_val = sun_alt_func(ts.tt_jd(mid_t))
-            if mid_val < 0:  # alt < -18
+            if mid_val < 0:
                 length_days = seg_b.tt - seg_a.tt
-                length_min = length_days*24*60
+                length_min = length_days * 24 * 60
                 astro_minutes += length_min
-        astro_hrs = astro_minutes / 60.0
+        astro_hrs = astro_minutes/60.0
+        st.write(f"DEBUG: astro_hrs = {astro_hrs:.2f} for {current}")
 
-        # If no_moon => exclude intervals moon is above horizon
         if no_moon:
-            all_times = sorted(
-                set([t_start, t_end] + list(sun_times) + list(moon_times)),
-                key=lambda x: x.tt
-            )
+            st.write("DEBUG: Doing no_moon logic")
+            all_times = sorted({t_start, t_end, *sun_times, *moon_times}, key=lambda x: x.tt)
             moonless_minutes = 0.0
             for i in range(len(all_times)-1):
                 seg_a = all_times[i]
                 seg_b = all_times[i+1]
                 mid_tt = seg_a.tt + 0.5*(seg_b.tt - seg_a.tt)
-                val_sun = sun_alt_func(ts.tt_jd(mid_tt))
-                val_moon = moon_alt_func(ts.tt_jd(mid_tt))
-                if (val_sun < 0) and (val_moon < 0):
+                s_val = sun_alt_func(ts.tt_jd(mid_tt))
+                m_val = moon_alt_func(ts.tt_jd(mid_tt))
+                if s_val < 0 and m_val < 0:
                     length_days = seg_b.tt - seg_a.tt
                     length_min = length_days*24*60
                     moonless_minutes += length_min
@@ -183,7 +162,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         else:
             moonless_hrs = astro_hrs
 
-        # Start/end darkness local
+        # Start/end darkness
         def alt_sign_sun(tt):
             return sun_alt_func(tt) < 0
         big_sun = [t_start] + list(sun_times) + [t_end]
@@ -192,17 +171,15 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         end_dark_str = "-"
         for i in range(len(big_sun)-1):
             if not big_signs[i] and big_signs[i+1]:
-                # crossing into negative => start
                 cross_t = big_sun[i+1]
                 dt_loc = cross_t.utc_datetime().astimezone(local_tz)
                 start_dark_str = dt_loc.strftime("%H:%M")
             if big_signs[i] and not big_signs[i+1]:
-                # crossing out => end
                 cross_t = big_sun[i+1]
                 dt_loc = cross_t.utc_datetime().astimezone(local_tz)
                 end_dark_str = dt_loc.strftime("%H:%M")
 
-        # Moon rise/set local
+        # Moon rise/set
         def alt_sign_moon(tt):
             return moon_alt_func(tt) >= 0
         big_moon = [t_start] + list(moon_times) + [t_end]
@@ -224,13 +201,13 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         local_noon_aware = local_tz.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
         t_noon = ts.from_datetime(noon_utc)
-        # build observer again
         topos_noon = Topos(latitude_degrees=lat, longitude_degrees=lon)
         obs_noon = eph['Earth'] + topos_noon
         sun_ecl = obs_noon.at(t_noon).observe(eph['Sun']).apparent().ecliptic_latlon()
         moon_ecl = obs_noon.at(t_noon).observe(eph['Moon']).apparent().ecliptic_latlon()
         phase_angle = (moon_ecl[1].degrees - sun_ecl[1].degrees) % 360
 
+        # Store results
         day_results.append({
             "date": current.strftime("%Y-%m-%d"),
             "astro_dark_hours": round(astro_hrs,2),
@@ -245,11 +222,11 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         current += timedelta(days=1)
         day_count += 1
 
+    st.write("DEBUG: Exiting compute_day_details with results.")
     return day_results
 
-
-# (9) Main streamlit function
-def main():                                         # line 226
+# (8) Main function
+def main():                                        # line 271
     # Session defaults
     if "lat" not in st.session_state:
         st.session_state["lat"] = 31.6258
@@ -260,88 +237,62 @@ def main():                                         # line 226
 
     st.subheader("Location & Date Range")
 
-    # Row: city + IP
-    row1_col1, row1_col2 = st.columns([2,1])        # line 238
-    with row1_col1:
+    # Row: city
+    col_city1, col_city2 = st.columns([2,1])       # line 282
+    with col_city1:
         city_input = st.text_input("City (optional)", value=st.session_state["city"])
-    with row1_col2:
-        st.write("")  # to align button
-        if st.button("Use IP Location"):
-            lat_ip, lon_ip = get_ip_location()
-            if lat_ip and lon_ip:
-                st.session_state["lat"] = lat_ip
-                st.session_state["lon"] = lon_ip
-                found_city = reverse_geocode(lat_ip, lon_ip)
-                if found_city:
-                    st.session_state["city"] = found_city
-                st.success(f"Set lat={lat_ip:.4f}, lon={lon_ip:.4f}")
-            else:
-                st.warning("No IP location found.")
+    with col_city2:
+        st.write("")  # alignment placeholder
+        # No IP location to avoid external call - you can re-add if needed
 
-    # If city changed
     if city_input != st.session_state["city"]:
         st.session_state["city"] = city_input
         coords = geocode_place(city_input)
         if coords:
             st.session_state["lat"], st.session_state["lon"] = coords
         else:
-            st.warning("City not found. Check spelling or use lat/lon.")
+            st.warning("City not found. Check spelling or specify lat/lon.")
 
     # Row: lat/lon
-    row2_col1, row2_col2 = st.columns(2)            # line 265
-    with row2_col1:
+    row2c1, row2c2 = st.columns(2)
+    with row2c1:
         new_lat = st.number_input("Latitude", value=st.session_state["lat"], format="%.6f")
-    with row2_col2:
+    with row2c2:
         new_lon = st.number_input("Longitude", value=st.session_state["lon"], format="%.6f")
 
     if abs(new_lat - st.session_state["lat"])>1e-9 or abs(new_lon - st.session_state["lon"])>1e-9:
         st.session_state["lat"] = new_lat
         st.session_state["lon"] = new_lon
-        ccity = reverse_geocode(new_lat, new_lon)
-        if ccity:
-            st.session_state["city"] = ccity
+        # Optionally reverse geocode if you like
+        guess_city = reverse_geocode(new_lat, new_lon)
+        if guess_city:
+            st.session_state["city"] = guess_city
 
-    # Row: date range + no moon
-    row3_col1, row3_col2 = st.columns([2,1])        # line 279
-    with row3_col1:
-        # Default up to 7 days
-        d_range = st.date_input("Date Range (max 7 days)", [date(2025,10,15), date(2025,10,18)])
-        if len(d_range) == 1:
+    # Row: date range + no_moon
+    row3c1, row3c2 = st.columns([2,1])
+    with row3c1:
+        d_range = st.date_input("Date Range (max 3 days)", [date(2025,10,15), date(2025,10,16)])
+        if len(d_range)==1:
             start_d = d_range[0]
             end_d = d_range[0]
         else:
             start_d, end_d = d_range[0], d_range[-1]
-    with row3_col2:
-        st.write("")  # align checkbox
+    with row3c2:
+        st.write("")  # alignment placeholder
         no_moon = st.checkbox("No Moon", value=False)
 
-    # optional map
-    with st.expander("Pick on Map (optional)"):
-        st.write("Click location on map to set lat/lon:")
-        map_loc = [st.session_state["lat"], st.session_state["lon"]]
-        fol_map = folium.Map(location=map_loc, zoom_start=5)
-        folium.TileLayer("OpenStreetMap").add_to(fol_map)
-        fol_map.add_child(folium.LatLngPopup())
-        map_data = st_folium(fol_map, width=600, height=400)
-        if map_data and map_data["last_clicked"]:
-            clat = map_data["last_clicked"]["lat"]
-            clng = map_data["last_clicked"]["lng"]
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            ccity2 = reverse_geocode(clat, clng)
-            if ccity2:
-                st.session_state["city"] = ccity2
-            st.info(f"Selected lat={clat:.4f}, lon={clng:.4f}")
+    # limited to 3 days
+    st.write("DEBUG: Checking user date range selection")
+    delta_days = (end_d - start_d).days + 1
+    if delta_days>3:
+        st.error("Please pick a range of 3 days or fewer.")
+        return
 
     # Calculate
-    if st.button("Calculate"):                      # line 306
-        if start_d > end_d:
+    if st.button("Calculate"):
+        st.write("DEBUG: Starting calculation...")
+        if start_d> end_d:
             st.error("Start date must be <= end date.")
-            return
-        # Check if user picks >7 days
-        delta_days = (end_d - start_d).days + 1
-        if delta_days > 7:
-            st.error("Please pick a range of 7 days or fewer.")
             return
 
         daily_data = compute_day_details(
@@ -352,7 +303,7 @@ def main():                                         # line 226
             no_moon
         )
         if not daily_data:
-            st.warning("No data (maybe over 7 days?).")
+            st.warning("No data or maybe 0-day range.")
             return
 
         total_astro = sum(x["astro_dark_hours"] for x in daily_data)
@@ -380,16 +331,13 @@ def main():                                         # line 226
         })
         st.table(df)
 
-
-# (10) Run main
-if __name__ == "__main__":                        # line 346
-    main()                                         # line 347
-
-# -----------------------------------------------------
+if __name__ == "__main__":
+    main()
+# ----------------------------------------------------------------
 # End of app.py
 #
-# Key changes from previous code:
-# 1) max_days = 7 (line 89) instead of 14.
-# 2) The date input, default is 3 days for demonstration, with a check for over 7 days.
-# 3) Everything else is the same layout, with .step_days=0.5 and day-by-day breakdown.
-# -----------------------------------------------------
+# Key points:
+# 1) Range limited to 3 days with explicit check (line ~169).
+# 2) step_days=1.0 for both sun_alt_func and moon_alt_func.
+# 3) Extra st.write("DEBUG: ...") statements to see logs progression.
+# 4) IP location calls removed, so fewer external dependencies.
