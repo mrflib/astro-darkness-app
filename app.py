@@ -1,29 +1,29 @@
 import streamlit as st
-import requests
+from datetime import date, datetime, time, timedelta
+import pytz
+from timezonefinder import TimezoneFinder
 import pandas as pd
-from datetime import date, datetime, timedelta
 from skyfield.api import Topos, load
 from geopy.geocoders import Nominatim
 import folium
 from streamlit_folium import st_folium
+import math
 
 # -------------------------------------------------------------------
-# PAGE CONFIG: Single-column, mobile-friendly
+# CONFIG: Single-column for mobile
 # -------------------------------------------------------------------
 st.set_page_config(
     page_title="Astronomical Darkness Calculator",
     page_icon="🌑",
-    layout="centered"  # single column, more phone-friendly
+    layout="centered"
 )
 
 # -------------------------------------------------------------------
-# LOCATION & WEATHER HELPERS
+# GEOLOCATION HELPERS
 # -------------------------------------------------------------------
 def get_ip_location():
-    """
-    Approx. user location from IP (ipapi.co).
-    Returns (lat, lon) or (None, None).
-    """
+    """Approx user location by IP (ipapi.co)."""
+    import requests
     try:
         r = requests.get("https://ipapi.co/json/")
         if r.status_code == 200:
@@ -34,6 +34,8 @@ def get_ip_location():
     return (None, None)
 
 def geocode_place(place_name):
+    """Convert city/place name -> (lat, lon)."""
+    from geopy.geocoders import Nominatim
     geolocator = Nominatim(user_agent="astro_app")
     try:
         loc = geolocator.geocode(place_name)
@@ -44,133 +46,21 @@ def geocode_place(place_name):
     return None
 
 def reverse_geocode(lat, lon):
+    """Convert lat/lon -> city name (approx)."""
+    from geopy.geocoders import Nominatim
     geolocator = Nominatim(user_agent="astro_app")
     try:
         loc = geolocator.reverse((lat, lon), language='en')
         if loc and loc.address:
             addr = loc.raw.get('address', {})
-            city_guess = addr.get('city') or addr.get('town') or addr.get('village') or loc.address
-            return city_guess
+            guess = addr.get('city') or addr.get('town') or addr.get('village') or loc.address
+            return guess
     except:
         pass
     return ""
 
 # -------------------------------------------------------------------
-# HISTORICAL MONTHLY WEATHER (LAST 3 YEARS)
-# We call the Open-Meteo "archive" for each of the last 3 years,
-# restricting the query to the user-chosen month.
-# We'll compute average day/night temp, humidity, cloudcover, dew, wind speed.
-# -------------------------------------------------------------------
-def get_monthly_weather_3year_avg(lat, lon, month):
-    """
-    For the chosen 'month' (1..12), get data from the last 3 years.
-    We'll do year = current_year-1, year = current_year-2, year = current_year-3 
-    (or pick whichever 3 you want).
-    Then average them.
-
-    We return a dict with:
-      'day_temp', 'night_temp', 'day_cloud', 'night_cloud',
-      'day_humidity', 'night_humidity', 'day_dew', 'night_dew',
-      'day_wind', 'night_wind',
-      'title' => e.g. "Historical Weather for January"
-    or None if no data available.
-    """
-    # We'll pick: last 3 complete years from now
-    # E.g. if today is 2025 => we fetch 2022, 2023, 2024 data. 
-    # But that might be future if user is in 2023. Let's keep it simpler:
-    # We'll just do the last 3 known full years (like 2020, 2021, 2022).
-    # You can tweak if you want a different approach.
-
-    # Hardcode a small range for demonstration
-    years_to_fetch = [2020, 2021, 2022]
-
-    # We'll store day vs night arrays across all 3 years
-    day_temp_vals, night_temp_vals = [], []
-    day_cloud_vals, night_cloud_vals = [], []
-    day_hum_vals, night_hum_vals = [], []
-    day_dew_vals, night_dew_vals = [], []
-    day_wind_vals, night_wind_vals = [], []
-
-    for y in years_to_fetch:
-        # Construct start/end for that month
-        start_d = date(y, month, 1)
-        # end of that month
-        if month == 12:
-            end_d = date(y, 12, 31)
-        else:
-            end_d = date(y, month+1, 1) - timedelta(days=1)
-
-        # Query Open-Meteo archive
-        url = (
-            "https://archive-api.open-meteo.com/v1/archive"
-            f"?latitude={lat}&longitude={lon}"
-            f"&start_date={start_d}&end_date={end_d}"
-            "&hourly=temperature_2m,relativehumidity_2m,dewpoint_2m,cloudcover,windspeed_10m"
-            "&timezone=auto"
-        )
-        resp = requests.get(url)
-        if resp.status_code != 200:
-            continue
-        data = resp.json()
-        if "hourly" not in data or "time" not in data["hourly"]:
-            continue
-
-        times = data["hourly"]["time"]
-        temps = data["hourly"]["temperature_2m"]
-        hums = data["hourly"]["relativehumidity_2m"]
-        clouds = data["hourly"]["cloudcover"]
-        dewps = data["hourly"]["dewpoint_2m"]
-        winds = data["hourly"]["windspeed_10m"]
-
-        # separate day vs night (6..18 local = day)
-        for i, t_str in enumerate(times):
-            try:
-                t_dt = datetime.fromisoformat(t_str)
-                hr = t_dt.hour
-            except:
-                continue
-            temperature = temps[i]
-            humidity = hums[i]
-            cloud = clouds[i]
-            dewpt = dewps[i]
-            windspd = winds[i]
-
-            if 6 <= hr < 18:
-                day_temp_vals.append(temperature)
-                day_cloud_vals.append(cloud)
-                day_hum_vals.append(humidity)
-                day_dew_vals.append(dewpt)
-                day_wind_vals.append(windspd)
-            else:
-                night_temp_vals.append(temperature)
-                night_cloud_vals.append(cloud)
-                night_hum_vals.append(humidity)
-                night_dew_vals.append(dewpt)
-                night_wind_vals.append(windspd)
-
-    def avg(arr):
-        return (sum(arr)/len(arr)) if arr else None
-
-    # If we have zero data across all 3 years => None
-    if not day_temp_vals and not night_temp_vals:
-        return None
-
-    return {
-        "title": f"Historical Weather for {start_d.strftime('%B')}",
-        "day_temp": avg(day_temp_vals),
-        "night_temp": avg(night_temp_vals),
-        "day_cloud": avg(day_cloud_vals),
-        "night_cloud": avg(night_cloud_vals),
-        "day_humidity": avg(day_hum_vals),
-        "night_humidity": avg(night_hum_vals),
-        "day_dew": avg(day_dew_vals),
-        "night_dew": avg(night_dew_vals),
-        "day_wind": avg(day_wind_vals),
-        "night_wind": avg(night_wind_vals)
-    }
-
-# -------------------------------------------------------------------
-# ASTRONOMY: Day-by-day astro darkness with Skyfield
+# MOON PHASE ICON
 # -------------------------------------------------------------------
 def moon_phase_icon(angle_deg):
     """Return an emoji for the moon phase based on angle in [0..360]."""
@@ -192,112 +82,191 @@ def moon_phase_icon(angle_deg):
     else:
         return "🌘"
 
-def compute_daily_details(lat, lon, start_date, end_date, no_moon=False):
+# -------------------------------------------------------------------
+# DAY-BY-DAY ASTRONOMY WITH LOCAL TIME
+# -------------------------------------------------------------------
+def compute_daily_details_local(lat, lon, start_date, end_date, no_moon=False):
     """
-    Returns a list of daily dicts with astro darkness & moon times.
-    Limit to 14 days. 10-min increments for sun/moon altitude checks.
+    For each day from start_date to end_date (max 14 days):
+      - find local timezone
+      - step from local midnight to local midnight in 1-minute increments
+      - convert each local time -> UTC for Skyfield
+      - compute sun alt, moon alt
+      - sum times sun alt < -18 => astro darkness
+      - if no_moon => exclude times moon alt >= 0
+      - find minute of crossing for dark start/end, moon rise/set (with interpolation)
+      - store times in local format HH:MM
+      - also compute moon phase at local noon or so
+    Return a list of daily dicts.
     """
+    # Load ephemeris
     ts = load.timescale()
     eph = load('de421.bsp')
-    location = Topos(lat, lon)
-    sun = eph['Sun']
-    moon = eph['Moon']
-    observer = eph['Earth'] + location
-
+    # We figure out local timezone
+    tf = TimezoneFinder()
+    tz_name = tf.timezone_at(lng=lon, lat=lat)
+    if not tz_name:
+        tz_name = "UTC"
+    local_tz = pytz.timezone(tz_name)
+    
+    # We will store up to 14 days
     max_days = 14
     day_count = 0
     results = []
+    
+    # Predefine planet references
+    sun = eph['Sun']
+    moon = eph['Moon']
+    observer = eph['Earth'] + Topos(lat, lon)
+    
     current = start_date
-
     while current <= end_date and day_count < max_days:
-        step_minutes = 10
-        n_steps = (24*60)//step_minutes
-        day_start = ts.utc(current.year, current.month, current.day, 0, 0, 0)
+        # local midnight start
+        local_midnight = datetime(current.year, current.month, current.day, 0, 0, 0)
+        local_midnight_end = local_midnight + timedelta(days=1)
         
-        sun_alts, moon_alts, phases = [], [], []
-        times_list = [day_start.tt + (i*step_minutes)/(24*60) for i in range(n_steps+1)]
+        # We'll do 1-minute increments
+        # That is 1440 steps => might be slow for 14 days = 20160 steps. 
+        # If it's too slow, do 2-minute increments. Let's keep 1-min for better accuracy.
 
-        for t_tt in times_list:
-            t = ts.tt_jd(t_tt)
+        step_minutes = 1
+        # We'll store altitudes
+        sun_alts = []
+        moon_alts = []
+        times_local = []
+        
+        # We'll generate local times from midnight to midnight
+        dt_local = local_midnight
+        while dt_local < local_midnight_end:
+            times_local.append(dt_local)
+            dt_local += timedelta(minutes=step_minutes)
+        
+        # Convert each local time to UTC for skyfield
+        # Then compute alt
+        for i, loc_dt in enumerate(times_local):
+            # convert local -> UTC
+            loc_dt_utc = local_tz.normalize(local_tz.localize(loc_dt)).astimezone(pytz.utc)
+            # Build skyfield time
+            t = ts.from_datetime(loc_dt_utc)
+
+            # compute alt
             app_sun = observer.at(t).observe(sun).apparent()
             alt_sun, _, _ = app_sun.altaz()
             sun_deg = alt_sun.degrees
-
+            
             app_moon = observer.at(t).observe(moon).apparent()
             alt_moon, _, _ = app_moon.altaz()
             moon_deg = alt_moon.degrees
 
-            # Phase angle
-            sun_ecl = observer.at(t).observe(sun).apparent().ecliptic_latlon()
-            moon_ecl = observer.at(t).observe(moon).apparent().ecliptic_latlon()
-            ang = (moon_ecl[1].degrees - sun_ecl[1].degrees)%360
-
             sun_alts.append(sun_deg)
             moon_alts.append(moon_deg)
-            phases.append(ang)
-
+        
         # Summation approach
-        astro_minutes, moonless_minutes = 0, 0
-        dark_start_str, dark_end_str = None, None
+        astro_minutes = 0
+        moonless_minutes = 0
+        dark_start_minute = None
+        dark_end_minute = None
         darkness_started = False
-        for i in range(n_steps):
-            s_mid = (sun_alts[i] + sun_alts[i+1])/2
-            m_mid = (moon_alts[i] + moon_alts[i+1])/2
-            if s_mid < -18.0:
+
+        for i in range(len(times_local)-1):
+            sun_mid = (sun_alts[i] + sun_alts[i+1]) / 2.0
+            moon_mid = (moon_alts[i] + moon_alts[i+1]) / 2.0
+            if sun_mid < -18.0:
                 astro_minutes += step_minutes
                 if no_moon:
-                    if m_mid < 0.0:
+                    if moon_mid < 0.0:
                         moonless_minutes += step_minutes
                 else:
                     moonless_minutes += step_minutes
                 
                 if not darkness_started:
                     darkness_started = True
-                    hh = (i*step_minutes)//60
-                    mm = (i*step_minutes)%60
-                    dark_start_str = f"{hh:02d}:{mm:02d}"
+                    dark_start_minute = i  # approximate
             else:
                 if darkness_started:
-                    hh = (i*step_minutes)//60
-                    mm = (i*step_minutes)%60
-                    dark_end_str = f"{hh:02d}:{mm:02d}"
+                    dark_end_minute = i
                     darkness_started = False
-        if darkness_started and not dark_end_str:
-            dark_end_str = "24:00"
+        if darkness_started and dark_end_minute is None:
+            dark_end_minute = len(times_local)-1
+        
+        # Convert these start/end minute indexes to local time strings
+        if dark_start_minute is not None:
+            dark_start_local = times_local[dark_start_minute]
+            dark_start_str = dark_start_local.strftime("%H:%M")
+        else:
+            dark_start_str = "-"
+        if dark_end_minute is not None:
+            dark_end_local = times_local[dark_end_minute]
+            dark_end_str = dark_end_local.strftime("%H:%M")
+        else:
+            dark_end_str = "-"
 
-        # Moon rise/set
-        moon_rise_str, moon_set_str = None, None
+        # Moon rise/set detection
+        # We'll note the first crossing from negative -> positive as rise,
+        # and positive -> negative as set.
+        moonrise_minute = None
+        moonset_minute = None
         prev_alt = moon_alts[0]
         for i in range(1, len(moon_alts)):
             curr_alt = moon_alts[i]
-            if prev_alt<0 and curr_alt>=0 and not moon_rise_str:
-                hh = (i*step_minutes)//60
-                mm = (i*step_minutes)%60
-                moon_rise_str = f"{hh:02d}:{mm:02d}"
-            if prev_alt>=0 and curr_alt<0 and not moon_set_str:
-                hh = (i*step_minutes)//60
-                mm = (i*step_minutes)%60
-                moon_set_str = f"{hh:02d}:{mm:02d}"
+            if prev_alt < 0 and curr_alt >= 0 and moonrise_minute is None:
+                # We'll do a linear interpolation to find the crossing minute
+                # alt changes from prev_alt to curr_alt over 1 min
+                # crossing 0 => fraction
+                fraction = 0.0
+                if (curr_alt - prev_alt) != 0:
+                    fraction = -prev_alt / (curr_alt - prev_alt)
+                cross_minute = i - 1 + fraction
+                cross_idx = int(math.floor(cross_minute))
+                fraction_of_min = cross_minute - cross_idx
+                cross_time = times_local[cross_idx] + timedelta(minutes=(fraction_of_min))
+                moonrise_minute = cross_time
+            if prev_alt >= 0 and curr_alt < 0 and moonset_minute is None:
+                fraction = 0.0
+                if (curr_alt - prev_alt) != 0:
+                    fraction = -prev_alt / (curr_alt - prev_alt)
+                cross_minute = i - 1 + fraction
+                cross_idx = int(math.floor(cross_minute))
+                fraction_of_min = cross_minute - cross_idx
+                cross_time = times_local[cross_idx] + timedelta(minutes=(fraction_of_min))
+                moonset_minute = cross_time
             prev_alt = curr_alt
 
-        # Middle of day for phase
-        mid_phase = phases[n_steps//2]
-        icon = moon_phase_icon(mid_phase)
+        if moonrise_minute:
+            moonrise_str = moonrise_minute.strftime("%H:%M")
+        else:
+            moonrise_str = "-"
+        if moonset_minute:
+            moonset_str = moonset_minute.strftime("%H:%M")
+        else:
+            moonset_str = "-"
 
-        results.append({
+        # Let's pick local noon to find moon phase
+        # or pick the midpoint times_local[len(times_local)//2]
+        mid_idx = len(times_local)//2
+        mid_t_local = times_local[mid_idx]
+        mid_t_utc = local_tz.normalize(local_tz.localize(mid_t_local)).astimezone(pytz.utc)
+        t_mid = load.timescale().from_datetime(mid_t_utc)
+        # compute phase angle
+        sun_ecl = observer.at(t_mid).observe(sun).apparent().ecliptic_latlon()
+        moon_ecl = observer.at(t_mid).observe(moon).apparent().ecliptic_latlon()
+        phase_angle = (moon_ecl[1].degrees - sun_ecl[1].degrees)%360
+        
+        day_info = {
             "date": current.strftime("%Y-%m-%d"),
-            "astro_dark_hours": round(astro_minutes/60,2),
-            "moonless_hours": round(moonless_minutes/60,2),
-            "dark_start": dark_start_str if dark_start_str else "-",
-            "dark_end": dark_end_str if dark_end_str else "-",
-            "moon_rise": moon_rise_str if moon_rise_str else "-",
-            "moon_set": moon_set_str if moon_set_str else "-",
-            "moon_phase": icon
-        })
+            "astro_dark_hours": round(astro_minutes/60, 4),
+            "moonless_hours": round(moonless_minutes/60, 4),
+            "dark_start": dark_start_str,
+            "dark_end": dark_end_str,
+            "moon_rise": moonrise_str,
+            "moon_set": moonset_str,
+            "moon_phase": moon_phase_icon(phase_angle)
+        }
 
+        results.append(day_info)
         current += timedelta(days=1)
-        day_count+=1
-
+        day_count += 1
+    
     return results
 
 
@@ -306,39 +275,33 @@ def compute_daily_details(lat, lon, start_date, end_date, no_moon=False):
 # -------------------------------------------------------------------
 def main():
     st.title("Astronomical Darkness Calculator")
-    st.write("Find how many hours of true night you get, anywhere in the world.")
-
-    # Session defaults
+    st.write("Find how many hours of true night you get, with local times for sunset/moon times.")
+    
+    # If you prefer a single column, let's do minimal columns for the inputs
     if "lat" not in st.session_state:
-        st.session_state["lat"] = 51.5074
+        st.session_state["lat"] = 31.6258  # e.g. Marrakech
     if "lon" not in st.session_state:
-        st.session_state["lon"] = -0.1278
+        st.session_state["lon"] = -7.9892
     if "city" not in st.session_state:
-        st.session_state["city"] = "London"
+        st.session_state["city"] = "Marrakech"
 
-    # ---- LOCATION + DATE RANGE in single column, minimal scrolling ----
-    st.subheader("Setup")
-
+    st.subheader("Inputs")
     # Row 1: City, IP, lat/lon
-    row1_col1, row1_col2, row1_col3 = st.columns([1.5, 1, 1])
+    row1_col1, row1_col2 = st.columns([1.7,1])
     with row1_col1:
         city_input = st.text_input("City (optional)", value=st.session_state["city"], help="If used, lat/lon will update.")
     with row1_col2:
-        if st.button("Use My IP"):
-            ip_lat, ip_lon = get_ip_location()
-            if ip_lat and ip_lon:
-                st.session_state["lat"] = ip_lat
-                st.session_state["lon"] = ip_lon
-                # reverse geocode if possible
-                guessed = reverse_geocode(ip_lat, ip_lon)
-                if guessed:
-                    st.session_state["city"] = guessed
-                st.success(f"Set lat={ip_lat:.4f}, lon={ip_lon:.4f}")
+        if st.button("Use IP Location"):
+            lat_ip, lon_ip = get_ip_location()
+            if lat_ip and lon_ip:
+                st.session_state["lat"] = lat_ip
+                st.session_state["lon"] = lon_ip
+                guess_city = reverse_geocode(lat_ip, lon_ip)
+                if guess_city:
+                    st.session_state["city"] = guess_city
+                st.success(f"Set lat={lat_ip:.4f}, lon={lon_ip:.4f}")
             else:
-                st.warning("Could not get location from IP.")
-    with row1_col3:
-        st.write(" ")  # empty placeholder
-
+                st.warning("No location from IP.")
     # If city changed
     if city_input != st.session_state["city"]:
         st.session_state["city"] = city_input
@@ -346,135 +309,93 @@ def main():
         if coords:
             st.session_state["lat"], st.session_state["lon"] = coords
         else:
-            st.warning("City not found. Check spelling or specify lat/lon manually.")
+            st.warning("City not found or ambiguous. Check spelling or use lat/lon.")
 
-    # Row 2: lat, lon
+    # Row 2 lat/lon
     row2_col1, row2_col2 = st.columns(2)
     with row2_col1:
         new_lat = st.number_input("Latitude", value=st.session_state["lat"], format="%.6f")
     with row2_col2:
         new_lon = st.number_input("Longitude", value=st.session_state["lon"], format="%.6f")
-
     if abs(new_lat - st.session_state["lat"])>1e-9 or abs(new_lon - st.session_state["lon"])>1e-9:
         st.session_state["lat"] = new_lat
         st.session_state["lon"] = new_lon
-        # Optionally, reverse geocode to city
-        city_guess = reverse_geocode(new_lat, new_lon)
-        if city_guess:
-            st.session_state["city"] = city_guess
+        # optional reverse geocode
+        back_city = reverse_geocode(new_lat, new_lon)
+        if back_city:
+            st.session_state["city"] = back_city
 
-    # Row 3: Date range, No Moon
-    row3_col1, row3_col2 = st.columns([1.5, 1])
+    # Expander for map
+    with st.expander("Pick on Map (optional)"):
+        st.write("Click location on map to choose lat/lon.")
+        map_loc = [st.session_state["lat"], st.session_state["lon"]]
+        fol_map = folium.Map(location=map_loc, zoom_start=5)
+        folium.TileLayer("OpenStreetMap").add_to(fol_map)
+        fol_map.add_child(folium.LatLngPopup())
+        map_data = st_folium(fol_map, width=600, height=400)
+        if map_data and map_data["last_clicked"]:
+            clat = map_data["last_clicked"]["lat"]
+            clng = map_data["last_clicked"]["lng"]
+            st.session_state["lat"] = clat
+            st.session_state["lon"] = clng
+            guessed = reverse_geocode(clat, clng)
+            if guessed:
+                st.session_state["city"] = guessed
+            st.info(f"Selected lat={clat:.4f}, lon={clng:.4f}")
+
+    # Date range
+    row3_col1, row3_col2 = st.columns([1.4,1])
     with row3_col1:
-        d_range = st.date_input("Date Range (Max 14 days)", [date(2023,1,1), date(2023,1,7)])
+        d_range = st.date_input("Pick up to 14 days", [date(2025,10,15), date(2025,10,22)])
         if len(d_range)==1:
             start_d = d_range[0]
             end_d = d_range[0]
         else:
             start_d, end_d = d_range[0], d_range[-1]
     with row3_col2:
-        no_moon = st.checkbox("No Moon", value=False, help="Exclude times when the Moon is above the horizon.")
+        no_moon = st.checkbox("No Moon", value=False, help="Exclude times the Moon is above horizon")
 
-    # Optional Expander: Map
-    with st.expander("Pick on Map (optional)"):
-        st.write("Click on the map to choose location:")
-        default_loc = [st.session_state["lat"], st.session_state["lon"]]
-        my_map = folium.Map(location=default_loc, zoom_start=4)
-        folium.TileLayer("OpenStreetMap").add_to(my_map)
-        my_map.add_child(folium.LatLngPopup())
-        map_data = st_folium(my_map, width=600, height=400)
-        if map_data and map_data['last_clicked'] is not None:
-            clat = map_data['last_clicked']['lat']
-            clng = map_data['last_clicked']['lng']
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            city_guess = reverse_geocode(clat, clng)
-            if city_guess:
-                st.session_state["city"] = city_guess
-            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
-
-    # Calculate button
+    # Calculate
     if st.button("Calculate"):
         if start_d> end_d:
             st.error("Start date must be <= end date.")
             return
-        
-        # 1) Astronomy
-        daily_data = compute_daily_details(st.session_state["lat"], st.session_state["lon"], start_d, end_d, no_moon=no_moon)
-        if not daily_data:
-            st.warning("No data. Possibly date range > 14 days.")
-            return
 
+        # 1) compute day-by-day
+        daily_data = compute_daily_details_local(
+            st.session_state["lat"], st.session_state["lon"],
+            start_d, end_d, no_moon=no_moon
+        )
+        if not daily_data:
+            st.warning("No data (range may exceed 14 days?).")
+            return
+        # Summation
         total_astro = sum(d["astro_dark_hours"] for d in daily_data)
         total_moonless = sum(d["moonless_hours"] for d in daily_data)
 
-        # Show results
         st.write("---")
         st.subheader("Results")
-
         # Darkness boxes
-        colA, colB = st.columns(2)
-        with colA:
+        cA, cB = st.columns(2)
+        with cA:
             st.success(f"Total Astronomical Darkness: {total_astro:.2f} hrs")
-        with colB:
+        with cB:
             st.success(f"Moonless Darkness: {total_moonless:.2f} hrs")
 
-        # 2) Historical weather for month (last 3 yrs)
-        # We'll just take the start_d month as the "month of interest."
-        # If user picks a range that spans multiple months, this is simplified.
-        selected_month = start_d.month
-        weather_3yr = get_monthly_weather_3year_avg(st.session_state["lat"], st.session_state["lon"], selected_month)
-
-        # Display day-by-day table
+        # day-by-day table
         st.subheader("Day-by-Day Breakdown")
         df = pd.DataFrame(daily_data)
         df = df.rename(columns={
-            "date": "Date",
-            "astro_dark_hours": "Astro (hrs)",
-            "moonless_hours": "Moonless (hrs)",
-            "dark_start": "Dark Start",
-            "dark_end": "Dark End",
-            "moon_rise": "Moonrise",
-            "moon_set": "Moonset",
-            "moon_phase": "Phase"
+            "date":"Date",
+            "astro_dark_hours":"Astro (hrs)",
+            "moonless_hours":"Moonless (hrs)",
+            "dark_start":"Dark Start",
+            "dark_end":"Dark End",
+            "moon_rise":"Moonrise",
+            "moon_set":"Moonset",
+            "moon_phase":"Phase"
         })
         st.table(df)
-
-        # Weather box
-        if weather_3yr:
-            st.write("---")
-            st.subheader(weather_3yr['title'])  # e.g. "Historical Weather for January"
-            day_temp = weather_3yr['day_temp']
-            night_temp = weather_3yr['night_temp']
-            day_cld = weather_3yr['day_cloud']
-            night_cld = weather_3yr['night_cloud']
-            day_hum = weather_3yr['day_humidity']
-            night_hum = weather_3yr['night_humidity']
-            day_dew = weather_3yr['day_dew']
-            night_dew = weather_3yr['night_dew']
-            day_wind = weather_3yr['day_wind']
-            night_wind = weather_3yr['night_wind']
-
-            # Using two columns for day vs night
-            wcol1, wcol2 = st.columns(2)
-            with wcol1:
-                st.markdown(f"**Day Temp**: {day_temp:.1f} °C" if day_temp else "Day Temp: N/A")
-                st.markdown(f"**Day Cloud**: {day_cld:.1f}%" if day_cld else "Day Cloud: N/A")
-                st.markdown(f"**Day Humidity**: {day_hum:.1f}%" if day_hum else "Day Humidity: N/A")
-                st.markdown(f"**Day Dew Pt**: {day_dew:.1f} °C" if day_dew else "Day Dew Pt: N/A")
-                st.markdown(f"**Day Wind**: {day_wind:.1f} m/s" if day_wind else "Day Wind: N/A")
-
-            with wcol2:
-                st.markdown(f"**Night Temp**: {night_temp:.1f} °C" if night_temp else "Night Temp: N/A")
-                st.markdown(f"**Night Cloud**: {night_cld:.1f}%" if night_cld else "Night Cloud: N/A")
-                st.markdown(f"**Night Humidity**: {night_hum:.1f}%" if night_hum else "Night Humidity: N/A")
-                st.markdown(f"**Night Dew Pt**: {night_dew:.1f} °C" if night_dew else "Night Dew Pt: N/A")
-                st.markdown(f"**Night Wind**: {night_wind:.1f} m/s" if night_wind else "Night Wind: N/A")
-
-        else:
-            st.write("---")
-            st.subheader("Historical Weather for this Month")
-            st.write("No data found for the last 3 years (maybe location out of coverage?).")
 
 
 if __name__ == "__main__":
