@@ -181,11 +181,13 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
     day_count = 0
     current = start_date
 
-    total_days = (end_date - start_date).days + 1
-    for _ in range(total_days):
-        if day_count >= MAX_DAYS:
-            break
+    # Pre-fetch the next day's sun altitudes for accurate dark end time
+    next_day = end_date + timedelta(days=1)
+    sun_alts_next_day = []
+    moon_alts_next_day = []
+    times_list_next_day = []
 
+    while current <= end_date and day_count < MAX_DAYS:
         debug_print(f"Processing day {day_count + 1}: {current}")
 
         # local midnight -> next local midnight
@@ -402,14 +404,15 @@ def main():
     with console_container:
         st.markdown("#### Debug Console")
         console_box = st.empty()
-        console_text = st.text_area(
+        console_box.text_area(
             "",
             value=st.session_state["debug_console"],
             height=100,
             max_chars=None,
             key="debug_console_box",
             disabled=True,
-            help="Console output for debugging purposes."
+            help="Console output for debugging purposes.",
+            label_visibility="collapsed"
         )
 
     # Calculate Button and Deviation Minutes Dropdown
@@ -438,19 +441,6 @@ def main():
         &#9432;
         </span>
         """, unsafe_allow_html=True)
-
-    # Update the console box
-    with console_container:
-        console_text.text_area(
-            "",
-            value=st.session_state["debug_console"],
-            height=100,
-            max_chars=None,
-            key="debug_console_box",
-            disabled=True,
-            help="Console output for debugging purposes.",
-            label_visibility="collapsed"
-        )
 
     # Progress Bar
     progress_bar = st.progress(0)
@@ -524,7 +514,7 @@ def main():
 
     # Update the console box with the latest debug messages
     with console_container:
-        console_text.text_area(
+        console_box.text_area(
             "",
             value=st.session_state["debug_console"],
             height=100,
