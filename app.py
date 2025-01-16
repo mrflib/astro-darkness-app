@@ -188,6 +188,39 @@ def main():
                     f"**Total astronomical darkness** (Sun < -18°): **{total_darkness:.2f} hours**"
                 )
 
+import requests
+
+def get_ip_location():
+    """
+    Use an IP geolocation service for approximate lat/lon.
+    Not super accurate, but quick & easy.
+    """
+    try:
+        resp = requests.get("https://ipapi.co/json/")
+        if resp.status_code == 200:
+            data = resp.json()
+            lat = data.get("latitude", None)
+            lon = data.get("longitude", None)
+            return (lat, lon)
+    except:
+        pass
+    return (None, None)
+
+# ... inside your Streamlit 'main()' ...
+use_location = st.button("Use My Location")
+if use_location:
+    ip_lat, ip_lon = get_ip_location()
+    if ip_lat and ip_lon:
+        st.success(f"Approx location from IP: lat={ip_lat:.4f}, lon={ip_lon:.4f}")
+        # We can override the lat_input/lon_input or set a session state.
+        # For simplicity, let's just store them in st.session_state.
+        st.session_state["lat"] = ip_lat
+        st.session_state["lon"] = ip_lon
+
+# Then when we do lat_input = st.number_input(...),
+# we can do something like 'value=st.session_state.get("lat", default_lat)'
+
+
 # Run the app
 if __name__ == "__main__":
     main()
