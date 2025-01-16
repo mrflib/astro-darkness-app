@@ -1,15 +1,17 @@
-############################
-# app-not-discrete.py
-# Non-discrete step-based approach
-############################
+# app.py - A flexible version with config at the top
+# -------------------------------------------------------------------
 
-########## CONFIGURATION BLOCK ##########
-MAX_DAYS = 30         # how many days to allow (default 30)
-STEP_MINUTES = 1      # stepping in minutes (default 1)
-USE_CITY_SEARCH = True
-DEBUG = True
-SHOW_BULLETS = True
-######## END CONFIG BLOCK ###############
+############################
+# CONFIGURATION BLOCK
+############################
+MAX_DAYS = 30         # how many days to allow
+STEP_MINUTES = 5     # how many minutes between each step (default 60 = 1-hour)
+USE_CITY_SEARCH = True # toggle city input on or off
+DEBUG = True           # set to False if you want to hide debug prints
+
+############################
+# END CONFIGURATION BLOCK
+############################
 
 import streamlit as st
 from datetime import date, datetime, timedelta
@@ -18,37 +20,27 @@ from timezonefinder import TimezoneFinder
 import pandas as pd
 from skyfield.api import load, Topos
 
-if USE_CITY_SEARCH:
-    from geopy.geocoders import Nominatim
-
+# (1) PAGE CONFIG
 st.set_page_config(
-    page_title="Astronomical Darkness Calculator (Non-Discrete)",
+    page_title="Astronomical Darkness Calculator (configurable)",
     page_icon="🌑",
     layout="centered"
 )
 
-def maybe_show_bullets():
-    if SHOW_BULLETS:
-        st.write(f"- Up to {MAX_DAYS} days")
-        st.write(f"- Non-discrete step-based approach, {STEP_MINUTES}-min increments")
-        st.write(f"- City search is {'ON' if USE_CITY_SEARCH else 'OFF'}")
-        st.write(f"- Debug prints: {'YES' if DEBUG else 'NO'}")
+# (2) INTRO
+st.title("Astronomical Darkness Calculator (Configurable)")
+st.write(f"""
+- Up to **{MAX_DAYS} days**  
+- **{STEP_MINUTES}-minute** stepping  
+- City search is **{'ON' if USE_CITY_SEARCH else 'OFF'}**  
+- Debug prints: **{'YES' if DEBUG else 'NO'}**
+""")
 
+# (3) UTILS
 def debug_print(msg: str):
+    """Helper to conditionally print debug statements."""
     if DEBUG:
         st.write(msg)
-
-def geocode_place(place_name):
-    if not USE_CITY_SEARCH:
-        return None
-    geolocator = Nominatim(user_agent="astro_app")
-    try:
-        loc = geolocator.geocode(place_name)
-        if loc:
-            return (loc.latitude, loc.longitude)
-    except:
-        pass
-    return None
 
 def moon_phase_icon(phase_deg):
     x = phase_deg % 360
@@ -69,14 +61,35 @@ def moon_phase_icon(phase_deg):
     else:
         return "🌘"
 
+# If city search is ON, we import geopy and define geocode
+if USE_CITY_SEARCH:
+    from geopy.geocoders import Nominatim
+
+    def geocode_place(place_name):
+        geolocator = Nominatim(user_agent="astro_app")
+        try:
+            loc = geolocator.geocode(place_name)
+            if loc:
+                return (loc.latitude, loc.longitude)
+        except:
+            pass
+        return None
+else:
+    def geocode_place(place_name):
+        # Dummy, does nothing if search is off
+        return None
+
+# (4) A CACHED day-details function
 @st.cache_data
-def compute_day_details_step(lat, lon, start_date, end_date, no_moon):
-    debug_print("DEBUG: Entering compute_day_details_step")
+def compute_day_details(lat, lon, start_date, end_date, no_moon):
+    debug_print("DEBUG: Entering compute_day_details")
 
     ts = load.timescale()
     eph = load('de421.bsp')
     debug_print("DEBUG: Loaded timescale & ephemeris")
 
+    # Hard-coded max days from config
+    # step in minutes from config
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
@@ -103,7 +116,6 @@ def compute_day_details_step(lat, lon, start_date, end_date, no_moon):
 
     while current <= end_date and day_count < MAX_DAYS:
         debug_print(f"DEBUG: Day {day_count}, date={current}")
-
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
 
@@ -112,20 +124,19 @@ def compute_day_details_step(lat, lon, start_date, end_date, no_moon):
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
 
-        # build stepping
-        step_count = int((24*60)//STEP_MINUTES)
-        debug_print(f"DEBUG: step_count={step_count} for date={current}")
-
+        # Build times
+        steps_per_day = (24*60)//STEP_MINUTES
+        debug_print(f"DEBUG: steps_per_day={steps_per_day} for date={current}")
         times_list = []
-        for i in range(step_count+1):
+        for i in range(steps_per_day+1):
             dt_utc = start_utc + timedelta(minutes=i*STEP_MINUTES)
             times_list.append(ts.from_datetime(dt_utc))
 
         sun_alts = []
         moon_alts = []
-        for i, sky_t in enumerate(times_list):
-            alt_sun = sun_alt_deg(sky_t)
-            alt_moon = moon_alt_deg(sky_t)
+        for i in range(len(times_list)):
+            alt_sun = sun_alt_deg(times_list[i])
+            alt_moon = moon_alt_deg(times_list[i])
             sun_alts.append(alt_sun)
             moon_alts.append(alt_moon)
 
@@ -135,8 +146,8 @@ def compute_day_details_step(lat, lon, start_date, end_date, no_moon):
         astro_minutes = 0
         moonless_minutes = 0
         for i in range(len(times_list)-1):
-            s_mid = (sun_alts[i] + sun_alts[i+1])/2
-            m_mid = (moon_alts[i] + moon_alts[i+1])/2
+            s_mid = (sun_alts[i] + sun_alts[i+1]) / 2.0
+            m_mid = (moon_alts[i] + moon_alts[i+1]) / 2.0
             if s_mid < -18.0:
                 astro_minutes += STEP_MINUTES
                 if no_moon:
@@ -203,22 +214,25 @@ def compute_day_details_step(lat, lon, start_date, end_date, no_moon):
         current += timedelta(days=1)
         day_count+=1
 
-    debug_print("DEBUG: Exiting compute_day_details_step, returning results.")
+    debug_print("DEBUG: Exiting compute_day_details, returning results.")
     return day_results
 
-##################################
+# -------------------------------------------------------------------
 # MAIN
-##################################
+# -------------------------------------------------------------------
 def main():
-    maybe_show_bullets()
+    st.subheader("Input Lat/Lon (Optional City if USE_CITY_SEARCH=True)")
 
-    st.subheader("Location & Date Range (Non-Discrete Step)")
-
+    # If city search is ON:
     lat_default = 31.6258
     lon_default = -7.9892
 
     if USE_CITY_SEARCH:
-        city_input = st.text_input("City (optional)", "Marrakech")
+        # Show city text input
+        city_input = st.text_input(
+            "City Name (optional)", 
+            value="Marrakech"  # default
+        )
         if city_input:
             coords = geocode_place(city_input)
             if coords:
@@ -226,9 +240,11 @@ def main():
             else:
                 st.warning("City not found. Check spelling or use lat/lon below.")
 
+    # Lat/lon input
     lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
     lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
 
+    # Date range up to MAX_DAYS
     d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
     if len(d_range)==1:
         start_d = d_range[0]
@@ -248,10 +264,12 @@ def main():
             st.error("Start date must be <= end date.")
             return
 
-        st.write(f"DEBUG: Starting step-based calc with {STEP_MINUTES}-min steps, up to {MAX_DAYS} days.")
-        daily_data = compute_day_details_step(
-            lat_in, lon_in,
-            start_d, end_d,
+        st.write(f"DEBUG: Starting calc with {STEP_MINUTES}-min steps, up to {MAX_DAYS} days.")
+        daily_data = compute_day_details(
+            lat_in,
+            lon_in,
+            start_d,
+            end_d,
             no_moon
         )
         if not daily_data:
