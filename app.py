@@ -411,34 +411,10 @@ def main():
                 else:
                     st.warning("City not found from reverse geocode.")
 
-    # Selection for allowed deviation minutes
-    # Will be placed next to the Calculate button
+    # Selection for allowed deviation minutes and Progress Console in line
     st.markdown("####")
-
-    # Initialize a container for the console and progress bar
-    console_container = st.container()
-    with console_container:
-        st.markdown("#### Progress Console")
-        # Initialize the console display once with a unique key
-        console_placeholder = st.empty()
-        console_placeholder.text_area(
-            "",
-            value=st.session_state["progress_console"],
-            height=100,
-            max_chars=None,
-            key="progress_console_display",
-            disabled=True,
-            help="Progress Console displaying calculation steps.",
-            label_visibility="collapsed"
-        )
-
-    # Calculate Button and Deviation Minutes Dropdown
-    st.markdown("####")
-    row3_col1, row3_col2 = st.columns([3,1])
-    with row3_col1:
-        calculate_button = st.button("Calculate")
-    with row3_col2:
-        st.markdown("####")  # Align with button
+    row4_col1, row4_col2 = st.columns([1,2])
+    with row4_col1:
         step_options = {
             "1 Minute": 1,
             "2 Minutes": 2,
@@ -458,6 +434,25 @@ def main():
         &#9432;
         </span>
         """, unsafe_allow_html=True)
+
+    with row4_col2:
+        st.markdown("#### Progress Console")
+        # Initialize the console display once with a unique key
+        console_placeholder = st.empty()
+        console_placeholder.text_area(
+            "",
+            value=st.session_state["progress_console"],
+            height=100,
+            max_chars=None,
+            key="progress_console_display",
+            disabled=True,
+            help="Progress Console displaying calculation steps.",
+            label_visibility="collapsed"
+        )
+
+    # Calculate Button
+    st.markdown("####")
+    calculate_button = st.button("Calculate")
 
     # Progress Bar Placeholder
     progress_placeholder = st.empty()
@@ -511,9 +506,15 @@ def main():
         st.markdown("#### Results")
         cA, cB = st.columns(2)
         with cA:
-            st.success(f"Total Astronomical Darkness: {total_astro:.2f} hrs")
+            st.markdown(
+                f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
+                unsafe_allow_html=True
+            )
         with cB:
-            st.success(f"Moonless Darkness: {total_moonless:.2f} hrs")
+            st.markdown(
+                f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
+                unsafe_allow_html=True
+            )
 
         st.markdown("#### Day-by-Day Breakdown")
         df = pd.DataFrame(daily_data)
@@ -527,18 +528,18 @@ def main():
             "moon_set": "Moonset",
             "moon_phase": "Phase"
         })
-        # remove row index
-        df.index = df.index.map(lambda x: "")
+        # Remove row index by resetting index and dropping it
+        df.reset_index(drop=True, inplace=True)
         st.dataframe(df)
 
     # Update the console box with the latest debug messages
-    with console_container:
+    with console_placeholder.container():
         console_placeholder.text_area(
             "",
             value=st.session_state["progress_console"],
             height=100,
             max_chars=None,
-            key="progress_console_display_update",  # Ensure this key is unique and not reused
+            key="progress_console_display_update",  # Ensure this key is unique and not reused elsewhere
             disabled=True,
             help="Progress Console displaying calculation steps.",
             label_visibility="collapsed"
