@@ -337,7 +337,8 @@ def main():
             [st.session_state["start_date"], st.session_state["end_date"]],
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        if isinstance(dvals, list):
+        # Updated condition to check for both list and tuple
+        if isinstance(dvals, (list, tuple)):
             if len(dvals) == 1:
                 st.session_state["start_date"] = dvals[0]
                 st.session_state["end_date"] = dvals[0]
