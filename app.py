@@ -366,14 +366,16 @@ def main():
             "Deviation (Mins)",
             options=list(step_options.keys()),
             index=0,
-            help="Select how precise the calculation should be. Higher minutes reduce calculation time but are less accurate."
+            help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
+- **Higher values** (like 5 or 15 minutes) make calculations faster but less precise, saving computational resources.
+- **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges.
+
+**Choose the level of accuracy that suits your needs:**
+- **1 minute** for short periods (a few days)
+- **5 minutes or more** for longer durations (multiple weeks)
+"""
         )
-        # Tooltip explanation
-        st.markdown(f"""
-        <span title="Higher values like 5 or 15 minutes make the calculations faster but less precise, helping to save on computational resources. Lower values like 1 minute are more accurate but take longer, especially over many days.">
-        &#9432;
-        </span>
-        """, unsafe_allow_html=True)
+        # Removed the ⓘ tooltip icon completely
 
     # Row for Latitude and Longitude
     st.markdown("#### Coordinates")
@@ -527,9 +529,6 @@ def main():
         st.dataframe(df)
 
     # Update the console box with the latest debug messages
-    if "progress_console_display_update" not in st.session_state:
-        st.session_state["progress_console_display_update"] = ""
-
     with console_placeholder.container():
         console_placeholder.text_area(
             "",
