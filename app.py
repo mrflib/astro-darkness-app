@@ -217,8 +217,8 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
 
         day_results.append({
             "date": current.strftime("%Y-%m-%d"),
-            "astro_dark_hours": round(astro_hrs,2),
-            "moonless_hours": round(moonless_hrs,2),
+            "astro_dark_hours": round(astro_hrs, 2),
+            "moonless_hours": round(moonless_hrs, 2),
             "dark_start": start_str,
             "dark_end": end_str,
             "moon_rise": m_rise_str,
@@ -236,7 +236,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
 ########################################
 def main():
     st.title("Astronomical Darkness Calculator")
-    st.subheader("Plan astronomy holidays by finding areas with maximum darkness and minimal moonlight.")
+    st.subheader("Plan your astronomy holidays by finding areas with maximum darkness and minimal moonlight.")
 
     if "city" not in st.session_state:
         st.session_state["city"] = "Marrakech"
@@ -245,23 +245,74 @@ def main():
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
     if "start_date" not in st.session_state:
-        st.session_state["start_date"] = date(2025,10,15)
+        st.session_state["start_date"] = date(2025, 10, 15)
     if "end_date" not in st.session_state:
-        st.session_state["end_date"] = date(2025,10,16)
+        st.session_state["end_date"] = date(2025, 10, 16)
 
-    row1_col1, row1_col2 = st.columns([2,1])
+    row1_col1, row1_col2 = st.columns([2, 1])
     with row1_col1:
-        st.text_input(
+        city = st.text_input(
             "City (optional)",
             value=st.session_state["city"],
             help="Enter a city name (e.g., 'London').",
-            on_change=lambda: geocode_city(st.session_state["city"])
         )
+        if city:
+            coords = geocode_city(city)
+            if coords:
+                st.session_state["lat"], st.session_state["lon"] = coords
+                st.session_state["city"] = city
     with row1_col2:
-        dvals = st.date_input(
+        date_range = st.date_input(
             f"Pick up to {MAX_DAYS} days",
             [st.session_state["start_date"], st.session_state["end_date"]],
-            min_value=date(2000,1,1),
-            max_value=date.today() + timedelta(days=MAX_DAYS-1),
-            help=f"Select 1 to {MAX_DAYS} days."
+            min_value=date(2000, 1, 1),
+            max_value=date.today() + timedelta(days=MAX_DAYS - 1),
+            help=f"Select a date range of up to {MAX_DAYS} days."
         )
+        if len(date_range) == 2:
+            st.session_state["start_date"], st.session_state["end_date"] = date_range
+
+    lat = st.number_input("Latitude", value=st.session_state["lat"], format="%.6f")
+    lon = st.number_input("Longitude", value=st.session_state["lon"], format="%.6f")
+
+    no_moon = st.checkbox("No Moon", value=False, help="Exclude times when the Moon is above the horizon.")
+
+    # Map
+    with st.expander("Pick on Map"):
+        map_center = [st.session_state["lat"], st.session_state["lon"]]
+        map_widget = folium.Map(location=map_center, zoom_start=5)
+        folium.Marker(location=map_center, tooltip="Current Location").add_to(map_widget)
+        clicked = st_folium(map_widget, width=700, height=500)
+
+        if clicked and "last_clicked" in clicked:
+            lat_clicked, lon_clicked = clicked["last_clicked"]["lat"], clicked["last_clicked"]["lng"]
+            reverse_city = reverse_geocode(lat_clicked, lon_clicked)
+            st.session_state["lat"], st.session_state["lon"] = lat_clicked, lon_clicked
+            if reverse_city:
+                st.session_state["city"] = reverse_city
+
+    if st.button("Calculate"):
+        results = compute_day_details(lat, lon, st.session_state["start_date"], st.session_state["end_date"], no_moon)
+        if results:
+            total_astro = sum(d["astro_dark_hours"] for d in results)
+            total_moonless = sum(d["moonless_hours"] for d in results)
+
+            st.subheader("Results")
+            st.success(f"Total Astronomical Darkness: {total_astro:.2f} hrs")
+            st.success(f"Moonless Darkness: {total_moonless:.2f} hrs")
+
+            st.subheader("Day-by-Day Breakdown")
+            df = pd.DataFrame(results)
+            st.table(df.rename(columns={
+                "date": "Date",
+                "astro_dark_hours": "Astro (hrs)",
+                "moonless_hours": "Moonless (hrs)",
+                "dark_start": "Dark Start",
+                "dark_end": "Dark End",
+                "moon_rise": "Moonrise",
+                "moon_set": "Moonset",
+                "moon_phase": "Phase"
+            }))
+
+if __name__ == "__main__":
+    main()
