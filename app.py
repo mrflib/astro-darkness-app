@@ -46,7 +46,7 @@ st.markdown("""
 ########################################
 def debug_print(msg: str):
     if DEBUG:
-        # Append the message to the console box
+        # Append the message to the progress console
         st.session_state["progress_console"] += msg + "\n"
         # Limit the console to the last 5 lines
         lines = st.session_state["progress_console"].split("\n")
@@ -144,15 +144,16 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     # If dark end wasn't found on the same day, set it to "-"
     if found_start and end_str == "-":
         end_str = "-"
-
+    
     return (start_str, end_str)
 
 ########################################
 # Astro Calculation
 ########################################
-def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, console_placeholder, progress_placeholder):
+def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
     """
-    Performs the astronomical darkness calculations and updates the progress console and progress bar.
+    Performs the astronomical darkness calculations and updates the progress console.
+    Returns the day-by-day results.
     """
     ts = load.timescale()
     eph = load('de421.bsp')
@@ -188,20 +189,10 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, c
             break
 
         debug_print(f"Processing day {day_count + 1}: {current}")
-        console_placeholder.text_area(
-            "",
-            value=st.session_state["progress_console"],
-            height=100,
-            max_chars=None,
-            key="progress_console_display",
-            disabled=True,
-            help="Progress Console displaying calculation steps.",
-            label_visibility="collapsed"
-        )
 
         # Update progress bar
         progress = (day_count) / MAX_DAYS
-        progress_placeholder.progress(progress)
+        st.progress(progress)
 
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -280,15 +271,11 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, c
             "moon_phase": moon_phase_icon(phase_angle)
         })
 
-        # Update progress
+        current += timedelta(days=1)
         day_count += 1
-        progress = (day_count) / MAX_DAYS
-        progress_placeholder.progress(progress)
-        sleep(0.1)  # Simulate time-consuming calculation
 
     # Final update to progress bar
-    progress_placeholder.progress(100)
-    progress_placeholder.empty()
+    st.progress(100)
 
     return day_results
 
@@ -424,6 +411,7 @@ def main():
     with console_container:
         st.markdown("#### Progress Console")
         console_placeholder = st.empty()
+        # Initialize the console display
         console_placeholder.text_area(
             "",
             value=st.session_state["progress_console"],
@@ -495,9 +483,7 @@ def main():
             st.session_state["start_date"],
             st.session_state["end_date"],
             no_moon,
-            step_min,
-            console_placeholder,
-            progress_bar
+            step_min
         )
 
         # Final update to progress bar
