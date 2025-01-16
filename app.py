@@ -518,41 +518,6 @@ def main():
         df.reset_index(drop=True, inplace=True)
         st.dataframe(df)
 
-    # Update the console box with the latest debug messages
-    console_placeholder.text_area(
-        "Progress Console",
-        value=st.session_state["progress_console"],
-        height=150,
-        max_chars=None,
-        key="progress_console_display",  # Ensure this key is unique and used only once
-        disabled=True,
-        help="Progress Console displaying calculation steps.",
-        label_visibility="collapsed"
-    )
-
-    # Map in expander
-    with st.expander("Pick on Map (optional)", expanded=False):
-        st.markdown("####")
-        st.write("Click on the map to select lat/lon. If city search is ON, we will also reverse geocode to update the City field.")
-        default_loc = [st.session_state["lat"], st.session_state["lon"]]
-        f_map = folium.Map(location=default_loc, zoom_start=5, width="100%")
-        folium.TileLayer("OpenStreetMap").add_to(f_map)
-        f_map.add_child(folium.LatLngPopup())
-
-        map_result = st_folium(f_map, width=800, height=500)
-        if map_result and map_result.get("last_clicked"):
-            clat = map_result["last_clicked"]["lat"]
-            clng = map_result["last_clicked"]["lng"]
-            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            if USE_CITY_SEARCH:
-                cfound = reverse_geocode(clat, clng)
-                if cfound:
-                    st.success(f"Reverse geocoded city: {cfound}")
-                    st.session_state["city"] = cfound
-                else:
-                    st.warning("City not found from reverse geocode.")
-
+# Run the app
 if __name__=="__main__":
     main()
