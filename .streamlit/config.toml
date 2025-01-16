@@ -1,14 +1,15 @@
 [theme]
-base="light"                # or "dark"
-primaryColor="#4B8BBE"      # Example: Pythonic blue
-backgroundColor="#F5F5F5"   
-secondaryBackgroundColor="#FFFFFF"
-textColor="#262730"
-font="sans serif"           # choices: "sans serif", "serif", or "monospace"
+base="dark"
+primaryColor="#00B3A6"
+backgroundColor="#343541"
+secondaryBackgroundColor="#202123"
+textColor="#E8EAED"
+font="sans serif"
 
 [server]
 headless=true
 port=8501
+
 
 # Optional: wide layout can be enabled
 [browser]
