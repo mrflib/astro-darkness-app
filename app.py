@@ -1,45 +1,52 @@
-# app.py - A flexible version with bullet toggling only
-# -------------------------------------------------------------------
+############################
+# app.py - Using LocationIQ for City Geocoding
+############################
 
-############################
-# CONFIGURATION BLOCK
-############################
+########## CONFIGURATION BLOCK ##########
 MAX_DAYS = 30         # how many days to allow
-STEP_MINUTES = 1      # how many minutes between each step (default 1)
-USE_CITY_SEARCH = True # toggle city input on or off
-DEBUG = True           # set to False if you want to hide debug prints
-SHOW_BULLETS = True    # new toggle to show/hide the bullet points
-############################
-# END CONFIGURATION BLOCK
-############################
+STEP_MINUTES = 1      # how many minutes between each step
+USE_CITY_SEARCH = True 
+DEBUG = True
+SHOW_BULLETS = False   # hide bullets, per your request
+LOCATIONIQ_TOKEN = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"  # your public token
+######## END CONFIG BLOCK ###############
 
 import streamlit as st
 from datetime import date, datetime, timedelta
 import pytz
 from timezonefinder import TimezoneFinder
 import pandas as pd
+import requests
+
 from skyfield.api import load, Topos
 
-# (1) PAGE CONFIG
+# For the map
+import folium
+from streamlit_folium import st_folium
+
+########################################
+# PAGE CONFIG + Custom CSS for No Moon
+########################################
 st.set_page_config(
-    page_title="Astronomical Darkness Calculator (Configurable)",
+    page_title="Astronomical Darkness Calculator (LocationIQ)",
     page_icon="🌑",
     layout="centered"
 )
 
-# (2) INTRO
-def maybe_show_bullets():
-    """Show bullet points if SHOW_BULLETS=True."""
-    if SHOW_BULLETS:
-        st.write(f"- Up to **{MAX_DAYS} days**")
-        st.write(f"- **{STEP_MINUTES}-minute** stepping")
-        st.write(f"- City search is **{'ON' if USE_CITY_SEARCH else 'OFF'}**")
-        st.write(f"- Debug prints: **{'YES' if DEBUG else 'NO'}**")
+# Inline CSS to enlarge the No Moon checkbox
+st.markdown("""
+<style>
+    .stCheckbox > div:first-child {
+        transform: scale(1.3); 
+        margin-top: 8px;
+        margin-bottom: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-st.title("Astronomical Darkness Calculator (Configurable)")
-maybe_show_bullets()  # Show bullet points if toggled on
-
-# (3) UTILS
+########################################
+# UTILS
+########################################
 def debug_print(msg: str):
     """Helper to conditionally print debug statements."""
     if DEBUG:
@@ -64,26 +71,65 @@ def moon_phase_icon(phase_deg):
     else:
         return "🌘"
 
-# If city search is ON, we import geopy and define geocode
-if USE_CITY_SEARCH:
-    from geopy.geocoders import Nominatim
-
-    def geocode_place(place_name):
-        # The only change: add a longer timeout to reduce "City not found" errors
-        geolocator = Nominatim(user_agent="astro_app", timeout=10)
-        try:
-            loc = geolocator.geocode(place_name)
-            if loc:
-                return (loc.latitude, loc.longitude)
-        except:
-            pass
+########################################
+# LocationIQ GEOCODING
+########################################
+def geocode_city(city_name):
+    """
+    Use LocationIQ's /v1/search endpoint to convert city -> (lat,lon).
+    Returns (lat,lon) float or None if not found.
+    """
+    if not USE_CITY_SEARCH or not city_name.strip():
         return None
-else:
-    def geocode_place(place_name):
-        # Dummy, does nothing if search is off
-        return None
+    token = LOCATIONIQ_TOKEN
+    url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
+    headers = {"accept": "application/json"}
 
-# (4) A CACHED day-details function
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data)>0:
+                # Take the first result
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                return (lat, lon)
+        else:
+            debug_print(f"DEBUG: City lookup failed with code {resp.status_code}")
+    except Exception as e:
+        debug_print(f"DEBUG: City lookup error: {e}")
+    return None
+
+def reverse_geocode(lat, lon):
+    """
+    Use LocationIQ's /v1/reverse endpoint to convert (lat,lon)-> city.
+    Returns city name or None if not found.
+    """
+    token = LOCATIONIQ_TOKEN
+    url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
+    headers = {"accept": "application/json"}
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            # We can parse city or display_name
+            address = data.get("address", {})
+            # Try city, town, village, etc
+            city = address.get("city") or address.get("town") or address.get("village")
+            if city:
+                return city
+            # fallback
+            return data.get("display_name")
+        else:
+            debug_print(f"DEBUG: Reverse geocode failed code {resp.status_code}")
+    except Exception as e:
+        debug_print(f"DEBUG: Reverse geocode error: {e}")
+    return None
+
+########################################
+# Astronomy Calculation (unchanged)
+########################################
 @st.cache_data
 def compute_day_details(lat, lon, start_date, end_date, no_moon):
     debug_print("DEBUG: Entering compute_day_details")
@@ -112,11 +158,12 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         alt_moon, _, _ = app_moon.altaz()
         return alt_moon.degrees
 
+    max_days = MAX_DAYS
     day_results = []
     day_count = 0
     current = start_date
 
-    while current <= end_date and day_count < MAX_DAYS:
+    while current <= end_date and day_count < max_days:
         debug_print(f"DEBUG: Day {day_count}, date={current}")
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
@@ -220,9 +267,6 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
     return day_results
 
 def main():
-    # We only remove the bullet points in the intro. Everything else is the same.
-    # No bullet points or summary lines at the top.
-
     st.subheader("Input Lat/Lon (Optional City if USE_CITY_SEARCH=True)")
 
     lat_default = 31.6258
@@ -234,28 +278,58 @@ def main():
             value="Marrakech"  # default
         )
         if city_input:
-            coords = geocode_place(city_input)
+            coords = geocode_city(city_input)  # Use LocationIQ-based function
             if coords:
                 lat_default, lon_default = coords
             else:
-                st.warning("City not found. Check spelling or use lat/lon below.")
+                st.warning("City not found or blocked. Please use lat/lon below.")
 
-    lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
-    lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
+    # Two columns for lat/lon
+    col_lat, col_lon = st.columns(2)
+    with col_lat:
+        lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
+    with col_lon:
+        lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
 
-    d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
-    if len(d_range)==1:
-        start_d = d_range[0]
-        end_d = d_range[0]
-    else:
-        start_d, end_d = d_range[0], d_range[-1]
+    # Two columns for date range & no moon
+    col_date, col_checkbox = st.columns([2,1])
+    with col_date:
+        d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
+        if len(d_range)==1:
+            start_d = d_range[0]
+            end_d = d_range[0]
+        else:
+            start_d, end_d = d_range[0], d_range[-1]
+
+    with col_checkbox:
+        # Larger checkbox is done via the CSS above
+        no_moon = st.checkbox("No Moon", value=False)
+
+    # Map in an expander
+    with st.expander("Pick on Map (optional)"):
+        st.write("Click on the map to choose lat/lon, city will be looked up via LocationIQ reverse if city search is ON.")
+        map_loc = [lat_in, lon_in]
+        m = folium.Map(location=map_loc, zoom_start=4)
+        folium.TileLayer("OpenStreetMap").add_to(m)
+        m.add_child(folium.LatLngPopup())
+        map_data = st_folium(m, width=600, height=400)
+        if map_data and map_data.get("last_clicked"):
+            clat = map_data["last_clicked"]["lat"]
+            clng = map_data["last_clicked"]["lng"]
+            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
+            lat_in, lon_in = clat, clng
+            # If city search on, try reverse geocode
+            if USE_CITY_SEARCH:
+                rev_city = reverse_geocode(clat, clng)
+                if rev_city:
+                    st.success(f"Reverse geocoded city: {rev_city}")
+                else:
+                    st.warning("City not found or blocked via reverse geocode. Check lat/lon or usage limits.")
 
     delta_days = (end_d - start_d).days + 1
     if delta_days>MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         return
-
-    no_moon = st.checkbox("No Moon", value=False)
 
     if st.button("Calculate"):
         if start_d> end_d:
@@ -292,5 +366,56 @@ def main():
         })
         st.table(df)
 
+########################################
+# REPLACE Nominatim calls with LocationIQ
+########################################
+def geocode_city(city_name):
+    """
+    Use LocationIQ /v1/search to convert city->(lat,lon).
+    """
+    if not USE_CITY_SEARCH or not city_name.strip():
+        return None
+    token = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
+    url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
+    headers = {"accept": "application/json"}
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data)>0:
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                return (lat, lon)
+        else:
+            debug_print(f"DEBUG: City lookup code {resp.status_code}, text={resp.text}")
+    except Exception as e:
+        debug_print(f"DEBUG: City lookup error: {e}")
+    return None
+
+def reverse_geocode(lat, lon):
+    """
+    Use LocationIQ /v1/reverse to convert (lat,lon)-> city name.
+    """
+    if not USE_CITY_SEARCH:
+        return None
+    token = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
+    url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
+    headers = {"accept": "application/json"}
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            address = data.get("address", {})
+            city = address.get("city") or address.get("town") or address.get("village")
+            return city if city else data.get("display_name")
+        else:
+            debug_print(f"DEBUG: Reverse geocode code {resp.status_code}, text={resp.text}")
+    except Exception as e:
+        debug_print(f"DEBUG: Reverse geocode error: {e}")
+    return None
+
+# we run main
 if __name__ == "__main__":
     main()
