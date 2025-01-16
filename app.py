@@ -4,7 +4,7 @@
 
 ########## CONFIGURATION BLOCK ##########
 MAX_DAYS = 30         # how many days to allow (default 30)
-STEP_DAYS = 60  # ~1 minute in fraction of a day if we want "1-min stepping" 
+STEP_MINUTES = 1      # stepping in minutes (default 1)
 USE_CITY_SEARCH = True
 DEBUG = True
 SHOW_BULLETS = True
@@ -21,10 +21,6 @@ from skyfield.searchlib import find_discrete
 if USE_CITY_SEARCH:
     from geopy.geocoders import Nominatim
 
-# For the map expander
-import folium
-from streamlit_folium import st_folium
-
 ##################################
 # PAGE CONFIG
 ##################################
@@ -35,12 +31,12 @@ st.set_page_config(
 )
 
 ##################################
-# Optional bullet points at top
+# Optional bullet points
 ##################################
 def maybe_show_bullets():
     if SHOW_BULLETS:
         st.write(f"- Up to {MAX_DAYS} days")
-        st.write(f"- Discrete approach with ~1-minute stepping (`step_days = {STEP_DAYS}`)")
+        st.write(f"- Discrete approach (~{STEP_MINUTES}-minute stepping)")
         st.write(f"- City search is {'ON' if USE_CITY_SEARCH else 'OFF'}")
         st.write(f"- Debug prints: {'YES' if DEBUG else 'NO'}")
 
@@ -106,26 +102,30 @@ def compute_day_details_discrete(lat, lon, start_date, end_date, no_moon):
     local_tz = pytz.timezone(tz_name)
     debug_print(f"DEBUG: local_tz={tz_name}")
 
+    # Convert STEP_MINUTES to fraction of a day for skyfield's find_discrete
+    step_days = STEP_MINUTES / (24 * 60)
+
     day_results = []
     day_count = 0
     current = start_date
 
     # We'll define functions for sun alt crossing -18 & moon alt crossing 0
     def sun_alt_func(t):
+        # crossing from alt < -18 => negative => we define alt.deg - (-18)
         topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
         observer = eph['Earth'] + topos
         alt, _, _ = observer.at(t).observe(eph['Sun']).apparent().altaz()
         return alt.degrees - (-18.0)
-    sun_alt_func.step_days = STEP_DAYS
+    # step_days must be defined for find_discrete
+    sun_alt_func.step_days = step_days
 
     def moon_alt_func(t):
         topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
         observer = eph['Earth'] + topos
         alt, _, _ = observer.at(t).observe(eph['Moon']).apparent().altaz()
         return alt.degrees
-    moon_alt_func.step_days = STEP_DAYS
+    moon_alt_func.step_days = step_days
 
-    # We allow up to MAX_DAYS
     while current <= end_date and day_count < MAX_DAYS:
         debug_print(f"DEBUG: day {day_count}, date={current}")
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -160,7 +160,6 @@ def compute_day_details_discrete(lat, lon, start_date, end_date, no_moon):
                 astro_minutes += length_min
         astro_hrs = astro_minutes/60.0
 
-        # no_moon logic
         if no_moon:
             debug_print("DEBUG: Doing no_moon logic")
             all_times = sorted({ts_start, ts_end, *sun_times, *moon_times}, key=lambda x: x.tt)
@@ -188,7 +187,6 @@ def compute_day_details_discrete(lat, lon, start_date, end_date, no_moon):
         big_v = [alt_sign_sun(tt) for tt in big_sun]
         start_dark_str = "-"
         end_dark_str = "-"
-        # We keep the same approach
         found_dark = False
         for i in range(len(big_sun)-1):
             if not big_v[i] and big_v[i+1]:
@@ -217,7 +215,7 @@ def compute_day_details_discrete(lat, lon, start_date, end_date, no_moon):
                 dt_loc = cross_t.utc_datetime().astimezone(local_tz)
                 m_set_str = dt_loc.strftime("%H:%M")
 
-        # Moon phase
+        # Moon phase at local noon
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
         local_noon_aware = local_tz.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
@@ -249,58 +247,37 @@ def compute_day_details_discrete(lat, lon, start_date, end_date, no_moon):
 # MAIN
 ##################################
 def main():
-    maybe_show_bullets()
+    # Bullet points toggle
+    if SHOW_BULLETS:
+        st.write(f"- Up to {MAX_DAYS} days")
+        st.write(f"- Discrete approach (~{STEP_MINUTES}-minute stepping)")
+        st.write(f"- City search is {'ON' if USE_CITY_SEARCH else 'OFF'}")
+        st.write(f"- Debug prints: {'YES' if DEBUG else 'NO'}")
 
     st.subheader("Location & Date Range")
 
-    # Single row for city + date
-    row1_col1, row1_col2 = st.columns(2)
-    # By default, lat & lon
     lat_default = 31.6258
     lon_default = -7.9892
 
-    with row1_col1:
-        if USE_CITY_SEARCH:
-            city_input = st.text_input("City (optional)", "Marrakech")
-            if city_input:
-                coords = geocode_place(city_input)
-                if coords:
-                    lat_default, lon_default = coords
-                else:
-                    st.warning("City not found. Check spelling or use lat/lon below.")
-        else:
-            st.write("City search is OFF")
+    if USE_CITY_SEARCH:
+        city_input = st.text_input("City (optional)", "Marrakech")
+        if city_input:
+            coords = geocode_place(city_input)
+            if coords:
+                lat_default, lon_default = coords
+            else:
+                st.warning("City not found. Check spelling or use lat/lon below.")
 
-    with row1_col2:
-        d_range = st.date_input("Select up to 30 days", [date(2025,10,15), date(2025,10,16)])
-        if len(d_range)==1:
-            start_d = d_range[0]
-            end_d = d_range[0]
-        else:
-            start_d, end_d = d_range[0], d_range[-1]
+    lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
+    lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
 
-    # Single row for lat/lon
-    row2_col1, row2_col2 = st.columns(2)
-    with row2_col1:
-        lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
-    with row2_col2:
-        lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
+    d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
+    if len(d_range)==1:
+        start_d = d_range[0]
+        end_d = d_range[0]
+    else:
+        start_d, end_d = d_range[0], d_range[-1]
 
-    # Map in an expander
-    with st.expander("Pick on Map (optional)"):
-        st.write("Click on the map to set lat/lon:")
-        map_loc = [lat_in, lon_in]
-        fol_map = folium.Map(location=map_loc, zoom_start=5)
-        folium.TileLayer("OpenStreetMap").add_to(fol_map)
-        fol_map.add_child(folium.LatLngPopup())
-        map_data = st_folium(fol_map, width=600, height=400)
-        if map_data and map_data["last_clicked"]:
-            clat = map_data["last_clicked"]["lat"]
-            clng = map_data["last_clicked"]["lng"]
-            lat_in, lon_in = clat, clng
-            st.info(f"Selected lat={clat:.4f}, lon={clng:.4f}")
-
-    # Limit days
     delta_days = (end_d - start_d).days + 1
     if delta_days>MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
@@ -313,7 +290,8 @@ def main():
             st.error("Start date must be <= end date.")
             return
 
-        st.write(f"DEBUG: Starting discrete calc with step_days={STEP_DAYS}, up to {MAX_DAYS} days.")
+        st.write(f"DEBUG: Starting discrete calc with ~{STEP_MINUTES}-min steps, up to {MAX_DAYS} days.")
+
         daily_data = compute_day_details_discrete(
             lat_in, lon_in, start_d, end_d, no_moon
         )
@@ -332,6 +310,7 @@ def main():
             st.success(f"Moonless Darkness: {total_moonless:.2f} hrs")
 
         st.subheader("Day-by-Day Breakdown")
+        import pandas as pd
         df = pd.DataFrame(daily_data)
         df = df.rename(columns={
             "date":"Date",
@@ -344,7 +323,6 @@ def main():
             "moon_phase":"Phase"
         })
         st.table(df)
-
 
 if __name__ == "__main__":
     main()
