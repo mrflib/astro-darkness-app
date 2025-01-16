@@ -23,7 +23,7 @@ st.set_page_config(
 st.title("Astronomical Darkness (1-hour stepping, up to 3 days)")
 st.write(
     "No external calls, no city geocoding, no IP location, just lat/lon.\n"
-    "Stepping 1-hour increments for up to 3 days with debug prints.\n"
+    "Stepping in 1-hour increments for up to 3 days with debug prints.\n"
     "If this still fails on Streamlit Cloud, it's likely a platform/env issue."
 )
 
@@ -58,7 +58,7 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
     st.write("DEBUG: Entering compute_day_details_1hr()")
 
     ts = load.timescale()
-    eph = load('de421.bsp()
+    eph = load('de421.bsp')  # <-- FIXED here
     st.write("DEBUG: Loaded timescale & ephemeris")
 
     # Hard-coded 3-day limit
@@ -115,9 +115,9 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
         # alt arrays
         sun_alts = []
         moon_alts = []
-        for i in range(len(times_list)):
-            alt_sun = sun_alt_deg(times_list[i])
-            alt_moon = moon_alt_deg(times_list[i])
+        for i, sky_t in enumerate(times_list):
+            alt_sun = sun_alt_deg(sky_t)
+            alt_moon = moon_alt_deg(sky_t)
             sun_alts.append(alt_sun)
             moon_alts.append(alt_moon)
 
@@ -146,12 +146,10 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
         found_dark = False
         for i in range(len(sun_alts)-1):
             if sun_alts[i] < -18 and not found_dark:
-                # start
                 dt_loc = times_list[i].utc_datetime().astimezone(local_tz)
                 start_dark_str = dt_loc.strftime("%H:%M")
                 found_dark = True
             if found_dark and sun_alts[i]>=-18:
-                # end
                 dt_loc = times_list[i].utc_datetime().astimezone(local_tz)
                 end_dark_str = dt_loc.strftime("%H:%M")
                 break
@@ -205,7 +203,6 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
 def main():
     st.subheader("Inputs: 3-day limit, lat/lon only (no city, no IP)")
 
-    # Session defaults
     if "lat" not in st.session_state:
         st.session_state["lat"] = 31.6258
     if "lon" not in st.session_state:
