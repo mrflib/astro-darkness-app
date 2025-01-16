@@ -4,7 +4,7 @@
 
 ########## CONFIGURATION BLOCK ##########
 MAX_DAYS = 30         # how many days to allow (default 30)
-STEP_DAYS = 1  # ~1 minute in fraction of a day if we want "1-min stepping" 
+STEP_DAYS = 60  # ~1 minute in fraction of a day if we want "1-min stepping" 
 USE_CITY_SEARCH = True
 DEBUG = True
 SHOW_BULLETS = True
