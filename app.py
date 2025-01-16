@@ -38,6 +38,10 @@ st.markdown("""
         margin-top: 5px;
         margin-bottom: 5px;
     }
+    /* Fixed-width font for Progress Console */
+    .fixed-width {
+        font-family: "Courier New", Courier, monospace;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,11 +51,9 @@ st.markdown("""
 def debug_print(msg: str):
     if DEBUG:
         # Append the message to the progress console
+        if "progress_console" not in st.session_state:
+            st.session_state["progress_console"] = ""
         st.session_state["progress_console"] += msg + "\n"
-        # Limit the console to the last 5 lines
-        lines = st.session_state["progress_console"].split("\n")
-        if len(lines) > 5:
-            st.session_state["progress_console"] = "\n".join(lines[-5:])
 
 def moon_phase_icon(phase_deg):
     """Return an emoji for the moon phase."""
@@ -337,19 +339,22 @@ def main():
             [st.session_state["start_date"], st.session_state["end_date"]],
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        if len(dvals) == 1:
-            st.session_state["start_date"] = dvals[0]
-            st.session_state["end_date"] = dvals[0]
-        elif len(dvals) == 2:
-            start, end = dvals
-            delta_days = (end - start).days + 1
-            if delta_days > MAX_DAYS:
-                adjusted_end = start + timedelta(days=MAX_DAYS -1)
-                st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-                st.session_state["start_date"] = start
-                st.session_state["end_date"] = adjusted_end
+        if isinstance(dvals, list):
+            if len(dvals) == 1:
+                st.session_state["start_date"] = dvals[0]
+                st.session_state["end_date"] = dvals[0]
+            elif len(dvals) == 2:
+                start, end = dvals
+                delta_days = (end - start).days + 1
+                if delta_days > MAX_DAYS:
+                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
+                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+                    st.session_state["start_date"] = start
+                    st.session_state["end_date"] = adjusted_end
+                else:
+                    st.session_state["start_date"], st.session_state["end_date"] = start, end
             else:
-                st.session_state["start_date"], st.session_state["end_date"] = start, end
+                st.warning("Please select either a single date or a valid date range.")
         else:
             st.warning("Please select either a single date or a valid date range.")
 
@@ -432,9 +437,19 @@ def main():
                 else:
                     st.warning("City not found from reverse geocode.")
 
+    # Calculate Button and Progress Bar (Moved Above Progress Console)
+    st.markdown("####")
+    calculate_button = st.button("Calculate")
+
+    # Progress Bar Placeholder
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+    progress_text = st.empty()
+
     # Progress Console (Full Width)
     st.markdown("#### Progress Console")
     console_placeholder = st.empty()
+    # Fixed-width font and auto-scroll functionality
     console_placeholder.text_area(
         "",
         value=st.session_state["progress_console"],
@@ -443,17 +458,17 @@ def main():
         key="progress_console_display",
         disabled=True,
         help="Progress Console displaying calculation steps.",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        # Apply fixed-width font via CSS class
     )
-
-    # Calculate Button
-    st.markdown("####")
-    calculate_button = st.button("Calculate")
-
-    # Progress Bar Placeholder
-    progress_placeholder = st.empty()
-    progress_bar = progress_placeholder.progress(0)
-    progress_text = st.empty()
+    # Inject CSS to set fixed-width font for the text_area
+    st.markdown("""
+    <style>
+    textarea {
+        font-family: "Courier New", Courier, monospace;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
     # Check day range
     delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
@@ -529,17 +544,29 @@ def main():
         st.dataframe(df)
 
     # Update the console box with the latest debug messages
+    # Force the text_area to show the latest content by updating the key
+    if "progress_console_display_update" not in st.session_state:
+        st.session_state["progress_console_display_update"] = ""
+
     with console_placeholder.container():
         console_placeholder.text_area(
             "",
             value=st.session_state["progress_console"],
             height=150,
             max_chars=None,
-            key="progress_console_display_update",  # Ensure this key is unique and not reused elsewhere
+            key="progress_console_display_update",  # Dynamically updated key to force re-render
             disabled=True,
             help="Progress Console displaying calculation steps.",
             label_visibility="collapsed"
         )
+        # Inject CSS to set fixed-width font for the text_area within the container
+        st.markdown("""
+        <style>
+        textarea {
+            font-family: "Courier New", Courier, monospace;
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
 if __name__=="__main__":
     main()
