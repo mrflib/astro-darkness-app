@@ -1,5 +1,17 @@
-# app.py - Minimal stepping approach (1-hour increments), up to 3 days
+# app.py - A flexible version with config at the top
 # -------------------------------------------------------------------
+
+############################
+# CONFIGURATION BLOCK
+############################
+MAX_DAYS = 30         # how many days to allow
+STEP_MINUTES = 60     # how many minutes between each step (default 60 = 1-hour)
+USE_CITY_SEARCH = True # toggle city input on or off
+DEBUG = True           # set to False if you want to hide debug prints
+
+############################
+# END CONFIGURATION BLOCK
+############################
 
 import streamlit as st
 from datetime import date, datetime, timedelta
@@ -8,30 +20,29 @@ from timezonefinder import TimezoneFinder
 import pandas as pd
 from skyfield.api import load, Topos
 
-# -------------------------------------------------------------------
-# PAGE CONFIG
-# -------------------------------------------------------------------
+# (1) PAGE CONFIG
 st.set_page_config(
-    page_title="Astronomical Darkness Calculator (1-hour stepping)",
+    page_title="Astronomical Darkness Calculator (configurable)",
     page_icon="🌑",
     layout="centered"
 )
 
-# -------------------------------------------------------------------
-# INTRO
-# -------------------------------------------------------------------
-st.title("Astronomical Darkness (1-hour stepping, up to 3 days)")
-st.write(
-    "No external calls, no city geocoding, no IP location, just lat/lon.\n"
-    "Stepping in 1-hour increments for up to 3 days with debug prints.\n"
-    "If this still fails on Streamlit Cloud, it's likely a platform/env issue."
-)
+# (2) INTRO
+st.title("Astronomical Darkness Calculator (Configurable)")
+st.write(f"""
+- Up to **{MAX_DAYS} days**  
+- **{STEP_MINUTES}-minute** stepping  
+- City search is **{'ON' if USE_CITY_SEARCH else 'OFF'}**  
+- Debug prints: **{'YES' if DEBUG else 'NO'}**
+""")
 
-# -------------------------------------------------------------------
-# UTILS
-# -------------------------------------------------------------------
+# (3) UTILS
+def debug_print(msg: str):
+    """Helper to conditionally print debug statements."""
+    if DEBUG:
+        st.write(msg)
+
 def moon_phase_icon(phase_deg):
-    """Return an emoji for the moon phase based on angle in [0..360]."""
     x = phase_deg % 360
     if x < 22.5 or x >= 337.5:
         return "🌑"
@@ -50,28 +61,42 @@ def moon_phase_icon(phase_deg):
     else:
         return "🌘"
 
-# -------------------------------------------------------------------
-# MAIN CALC: 1-hour stepping, 3 days max
-# -------------------------------------------------------------------
+# If city search is ON, we import geopy and define geocode
+if USE_CITY_SEARCH:
+    from geopy.geocoders import Nominatim
+
+    def geocode_place(place_name):
+        geolocator = Nominatim(user_agent="astro_app")
+        try:
+            loc = geolocator.geocode(place_name)
+            if loc:
+                return (loc.latitude, loc.longitude)
+        except:
+            pass
+        return None
+else:
+    def geocode_place(place_name):
+        # Dummy, does nothing if search is off
+        return None
+
+# (4) A CACHED day-details function
 @st.cache_data
-def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
-    st.write("DEBUG: Entering compute_day_details_1hr()")
+def compute_day_details(lat, lon, start_date, end_date, no_moon):
+    debug_print("DEBUG: Entering compute_day_details")
 
     ts = load.timescale()
-    eph = load('de421.bsp')  # <-- FIXED here
-    st.write("DEBUG: Loaded timescale & ephemeris")
+    eph = load('de421.bsp')
+    debug_print("DEBUG: Loaded timescale & ephemeris")
 
-    # Hard-coded 3-day limit
-    max_days = 3
-
+    # Hard-coded max days from config
+    # step in minutes from config
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
         tz_name = "UTC"
     local_tz = pytz.timezone(tz_name)
-    st.write(f"DEBUG: local_tz={tz_name}")
+    debug_print(f"DEBUG: local_tz={tz_name}")
 
-    # Build observer
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
     observer = eph['Earth'] + topos
 
@@ -89,39 +114,33 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
     day_count = 0
     current = start_date
 
-    while current <= end_date and day_count < max_days:
-        st.write(f"DEBUG: Day {day_count}, date={current}")
+    while current <= end_date and day_count < MAX_DAYS:
+        debug_print(f"DEBUG: Day {day_count}, date={current}")
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
 
-        # Convert local->UTC
         start_aware = local_tz.localize(local_mid)
         end_aware = local_tz.localize(local_next)
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
-        t_start = ts.from_datetime(start_utc)
-        t_end = ts.from_datetime(end_utc)
-
-        step_minutes = 60
-        steps_per_day = 24
-        st.write(f"DEBUG: steps_per_day={steps_per_day} for date={current}")
 
         # Build times
+        steps_per_day = (24*60)//STEP_MINUTES
+        debug_print(f"DEBUG: steps_per_day={steps_per_day} for date={current}")
         times_list = []
         for i in range(steps_per_day+1):
-            dt_utc = start_utc + timedelta(minutes=i*step_minutes)
+            dt_utc = start_utc + timedelta(minutes=i*STEP_MINUTES)
             times_list.append(ts.from_datetime(dt_utc))
 
-        # alt arrays
         sun_alts = []
         moon_alts = []
-        for i, sky_t in enumerate(times_list):
-            alt_sun = sun_alt_deg(sky_t)
-            alt_moon = moon_alt_deg(sky_t)
+        for i in range(len(times_list)):
+            alt_sun = sun_alt_deg(times_list[i])
+            alt_moon = moon_alt_deg(times_list[i])
             sun_alts.append(alt_sun)
             moon_alts.append(alt_moon)
 
-        st.write("DEBUG: built alt arrays, length=", len(sun_alts))
+        debug_print(f"DEBUG: built alt arrays, length={len(sun_alts)}")
 
         # Summation
         astro_minutes = 0
@@ -130,15 +149,16 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
             s_mid = (sun_alts[i] + sun_alts[i+1]) / 2.0
             m_mid = (moon_alts[i] + moon_alts[i+1]) / 2.0
             if s_mid < -18.0:
-                astro_minutes += step_minutes
+                astro_minutes += STEP_MINUTES
                 if no_moon:
                     if m_mid < 0.0:
-                        moonless_minutes += step_minutes
+                        moonless_minutes += STEP_MINUTES
                 else:
-                    moonless_minutes += step_minutes
+                    moonless_minutes += STEP_MINUTES
+
         astro_hrs = astro_minutes/60.0
         moonless_hrs = moonless_minutes/60.0
-        st.write(f"DEBUG: date={current}, astro_hrs={astro_hrs:.2f}, moonless_hrs={moonless_hrs:.2f}")
+        debug_print(f"DEBUG: date={current}, astro_hrs={astro_hrs:.2f}, moonless_hrs={moonless_hrs:.2f}")
 
         # Dark start/end
         start_dark_str = "-"
@@ -192,53 +212,62 @@ def compute_day_details_1hr(lat, lon, start_date, end_date, no_moon):
         })
 
         current += timedelta(days=1)
-        day_count += 1
+        day_count+=1
 
-    st.write("DEBUG: Exiting compute_day_details_1hr(), returning results.")
+    debug_print("DEBUG: Exiting compute_day_details, returning results.")
     return day_results
 
 # -------------------------------------------------------------------
 # MAIN
 # -------------------------------------------------------------------
 def main():
-    st.subheader("Inputs: 3-day limit, lat/lon only (no city, no IP)")
+    st.subheader("Input Lat/Lon (Optional City if USE_CITY_SEARCH=True)")
 
-    if "lat" not in st.session_state:
-        st.session_state["lat"] = 31.6258
-    if "lon" not in st.session_state:
-        st.session_state["lon"] = -7.9892
+    # If city search is ON:
+    lat_default = 31.6258
+    lon_default = -7.9892
 
-    lat_in = st.number_input("Latitude", value=st.session_state["lat"], format="%.6f")
-    lon_in = st.number_input("Longitude", value=st.session_state["lon"], format="%.6f")
-    if abs(lat_in - st.session_state["lat"])>1e-9 or abs(lon_in - st.session_state["lon"])>1e-9:
-        st.session_state["lat"] = lat_in
-        st.session_state["lon"] = lon_in
+    if USE_CITY_SEARCH:
+        # Show city text input
+        city_input = st.text_input(
+            "City Name (optional)", 
+            value="Marrakech"  # default
+        )
+        if city_input:
+            coords = geocode_place(city_input)
+            if coords:
+                lat_default, lon_default = coords
+            else:
+                st.warning("City not found. Check spelling or use lat/lon below.")
 
-    c1, c2 = st.columns([2,1])
-    with c1:
-        d_range = st.date_input("Date Range (3 days max)", [date(2025,10,15), date(2025,10,16)])
-        if len(d_range)==1:
-            start_d = d_range[0]
-            end_d = d_range[0]
-        else:
-            start_d, end_d = d_range[0], d_range[-1]
-    with c2:
-        no_moon = st.checkbox("No Moon", value=False)
+    # Lat/lon input
+    lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
+    lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
+
+    # Date range up to MAX_DAYS
+    d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
+    if len(d_range)==1:
+        start_d = d_range[0]
+        end_d = d_range[0]
+    else:
+        start_d, end_d = d_range[0], d_range[-1]
 
     delta_days = (end_d - start_d).days + 1
-    if delta_days>3:
-        st.error("Please pick 3 days or fewer.")
+    if delta_days>MAX_DAYS:
+        st.error(f"Please pick {MAX_DAYS} days or fewer.")
         return
+
+    no_moon = st.checkbox("No Moon", value=False)
 
     if st.button("Calculate"):
         if start_d> end_d:
             st.error("Start date must be <= end date.")
             return
 
-        st.write("DEBUG: Starting calculation (1-hr stepping).")
-        daily_data = compute_day_details_1hr(
-            st.session_state["lat"],
-            st.session_state["lon"],
+        st.write(f"DEBUG: Starting calc with {STEP_MINUTES}-min steps, up to {MAX_DAYS} days.")
+        daily_data = compute_day_details(
+            lat_in,
+            lon_in,
             start_d,
             end_d,
             no_moon
