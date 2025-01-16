@@ -3,5 +3,7 @@ requests
 pandas
 skyfield
 geopy
+timezonefinder
+pytz
 folium
 streamlit-folium
