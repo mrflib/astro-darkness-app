@@ -1,14 +1,14 @@
-# app.py - A flexible version with config at the top
+# app.py - A flexible version with bullet toggling only
 # -------------------------------------------------------------------
 
 ############################
 # CONFIGURATION BLOCK
 ############################
 MAX_DAYS = 30         # how many days to allow
-STEP_MINUTES = 1    # how many minutes between each step (default 60 = 1-hour)
+STEP_MINUTES = 1      # how many minutes between each step (default 1)
 USE_CITY_SEARCH = True # toggle city input on or off
 DEBUG = True           # set to False if you want to hide debug prints
-
+SHOW_BULLETS = True    # new toggle to show/hide the bullet points
 ############################
 # END CONFIGURATION BLOCK
 ############################
@@ -22,19 +22,22 @@ from skyfield.api import load, Topos
 
 # (1) PAGE CONFIG
 st.set_page_config(
-    page_title="Astronomical Darkness Calculator (configurable)",
+    page_title="Astronomical Darkness Calculator (Configurable)",
     page_icon="🌑",
     layout="centered"
 )
 
 # (2) INTRO
+def maybe_show_bullets():
+    """Show bullet points if SHOW_BULLETS=True."""
+    if SHOW_BULLETS:
+        st.write(f"- Up to **{MAX_DAYS} days**")
+        st.write(f"- **{STEP_MINUTES}-minute** stepping")
+        st.write(f"- City search is **{'ON' if USE_CITY_SEARCH else 'OFF'}**")
+        st.write(f"- Debug prints: **{'YES' if DEBUG else 'NO'}**")
+
 st.title("Astronomical Darkness Calculator (Configurable)")
-st.write(f"""
-- Up to **{MAX_DAYS} days**  
-- **{STEP_MINUTES}-minute** stepping  
-- City search is **{'ON' if USE_CITY_SEARCH else 'OFF'}**  
-- Debug prints: **{'YES' if DEBUG else 'NO'}**
-""")
+maybe_show_bullets()  # Show bullet points if toggled on
 
 # (3) UTILS
 def debug_print(msg: str):
@@ -88,8 +91,6 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
     eph = load('de421.bsp')
     debug_print("DEBUG: Loaded timescale & ephemeris")
 
-    # Hard-coded max days from config
-    # step in minutes from config
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
@@ -107,8 +108,8 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
 
     def moon_alt_deg(t):
         app_moon = observer.at(t).observe(eph['Moon']).apparent()
-        alt, _, _ = app_moon.altaz()
-        return alt.degrees
+        alt_moon, _, _ = app_moon.altaz()
+        return alt_moon.degrees
 
     day_results = []
     day_count = 0
@@ -217,18 +218,16 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
     debug_print("DEBUG: Exiting compute_day_details, returning results.")
     return day_results
 
-# -------------------------------------------------------------------
-# MAIN
-# -------------------------------------------------------------------
 def main():
+    # We only remove the bullet points in the intro. Everything else is the same.
+    # No bullet points or summary lines at the top.
+
     st.subheader("Input Lat/Lon (Optional City if USE_CITY_SEARCH=True)")
 
-    # If city search is ON:
     lat_default = 31.6258
     lon_default = -7.9892
 
     if USE_CITY_SEARCH:
-        # Show city text input
         city_input = st.text_input(
             "City Name (optional)", 
             value="Marrakech"  # default
@@ -240,11 +239,9 @@ def main():
             else:
                 st.warning("City not found. Check spelling or use lat/lon below.")
 
-    # Lat/lon input
     lat_in = st.number_input("Latitude", value=lat_default, format="%.6f")
     lon_in = st.number_input("Longitude", value=lon_default, format="%.6f")
 
-    # Date range up to MAX_DAYS
     d_range = st.date_input(f"Pick up to {MAX_DAYS} days", [date(2025,10,15), date(2025,10,16)])
     if len(d_range)==1:
         start_d = d_range[0]
@@ -265,13 +262,7 @@ def main():
             return
 
         st.write(f"DEBUG: Starting calc with {STEP_MINUTES}-min steps, up to {MAX_DAYS} days.")
-        daily_data = compute_day_details(
-            lat_in,
-            lon_in,
-            start_d,
-            end_d,
-            no_moon
-        )
+        daily_data = compute_day_details(lat_in, lon_in, start_d, end_d, no_moon)
         if not daily_data:
             st.warning("No data?? Possibly 0-day range.")
             return
