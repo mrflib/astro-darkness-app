@@ -4,10 +4,10 @@
 
 ########## CONFIGURATION BLOCK ##########
 MAX_DAYS = 30
-STEP_MINUTES = 1
+STEP_MINUTES = 5
 USE_CITY_SEARCH = True
 DEBUG = True
-SHOW_BULLETS = False
+SHOW_BULLETS = True
 
 # LocationIQ public token for geocoding:
 LOCATIONIQ_TOKEN = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
