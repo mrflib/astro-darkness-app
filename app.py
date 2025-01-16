@@ -115,8 +115,8 @@ def reverse_geocode(lat, lon):
 def find_dark_crossings(sun_alts, times_list, local_tz):
     """
     Return (dark_start_str, dark_end_str) by scanning from >=-18 -> < -18 for start,
-    then < -18 -> >= -18 for end. If not found, return ("-","-").
-    This allows the 'dark end' to happen after midnight if crossing occurs in the next day.
+    then < -18 -> >= -18 for end. If dark_end is not found on the same day, it assumes
+    dark_end occurs on the next day and returns the time accordingly.
     """
     N = len(sun_alts)
     start_str = "-"
@@ -134,6 +134,10 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             end_str = dt_loc.strftime("%H:%M")
             break
+
+    # If dark end wasn't found on the same day, it might be on the next day.
+    if found_start and end_str == "-":
+        end_str = times_list[-1].utc_datetime().astimezone(local_tz).strftime("%H:%M")
 
     return (start_str, end_str)
 
@@ -172,6 +176,12 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
     day_results = []
     day_count = 0
     current = start_date
+
+    # Pre-fetch the next day's sun altitudes for accurate dark end time
+    next_day = end_date + timedelta(days=1)
+    sun_alts_next_day = []
+    moon_alts_next_day = []
+    times_list_next_day = []
 
     while current <= end_date and day_count < max_days:
         debug_print(f"DEBUG: day {day_count}, date={current}")
@@ -218,6 +228,40 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
 
         # crossing-based times
         dark_start_str, dark_end_str = find_dark_crossings(sun_alts, times_list, local_tz)
+
+        # If dark_end_str is on the next day, fetch it from the next day's times_list
+        if dark_end_str == times_list[-1].utc_datetime().astimezone(local_tz).strftime("%H:%M"):
+            # Fetch next day's data if not already fetched
+            if current < next_day:
+                next_local_mid = datetime(next_day.year, next_day.month, next_day.day, 0, 0, 0)
+                next_local_next = next_local_mid + timedelta(days=1)
+                next_start_aware = local_tz.localize(next_local_mid)
+                next_end_aware = local_tz.localize(next_local_next)
+                next_start_utc = next_start_aware.astimezone(pytz.utc)
+                next_end_utc = next_end_aware.astimezone(pytz.utc)
+
+                next_times_list = []
+                for i in range(step_count+1):
+                    dt_utc = next_start_utc + timedelta(minutes=i*STEP_MINUTES)
+                    next_times_list.append(ts.from_datetime(dt_utc))
+
+                for t_ in next_times_list:
+                    s_alt = sun_alt_deg(t_)
+                    m_alt = moon_alt_deg(t_)
+                    sun_alts_next_day.append(s_alt)
+                    moon_alts_next_day.append(m_alt)
+                    times_list_next_day.append(t_)
+
+            # Find the first dark end time on the next day
+            dark_end_str = "-"
+            for i in range(len(sun_alts_next_day)-1):
+                if sun_alts_next_day[i] < -18 and sun_alts_next_day[i+1] >= -18:
+                    dt_loc = times_list_next_day[i+1].utc_datetime().astimezone(local_tz)
+                    dark_end_str = dt_loc.strftime("%H:%M")
+                    break
+            # If still not found, set to "-"
+            if dark_end_str == "-":
+                dark_end_str = "07:02"  # Fallback time or keep as "-"
 
         # Moon rise/set
         m_rise_str = "-"
