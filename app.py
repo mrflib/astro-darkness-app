@@ -30,13 +30,17 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox 
+# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
 st.markdown("""
 <style>
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
         margin-bottom: 5px;
+    }
+    /* Fixed-width font for Progress Console */
+    textarea {
+        font-family: "Courier New", Courier, monospace;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -48,10 +52,6 @@ def debug_print(msg: str):
     if DEBUG:
         # Append the message to the progress console
         st.session_state["progress_console"] += msg + "\n"
-        # Limit the console to the last 5 lines
-        lines = st.session_state["progress_console"].split("\n")
-        if len(lines) > 5:
-            st.session_state["progress_console"] = "\n".join(lines[-5:])
 
 def moon_phase_icon(phase_deg):
     """Return an emoji for the moon phase."""
@@ -154,7 +154,7 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
 ########################################
 # Astro Calculation
 ########################################
-def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, progress_bar):
+def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar):
     """
     Performs the astronomical darkness calculations and updates the progress console and progress bar.
     Returns the day-by-day results.
@@ -229,11 +229,11 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, p
             m_mid = (moon_alts[i] + moon_alts[i+1])/2
             if s_mid < -18.0:  # astro dark
                 astro_minutes += step_minutes
-                if no_moon:
+                if moon_affect == "Ignore Moonlight":
+                    moonless_minutes += step_minutes
+                else:
                     if m_mid < 0.0:
                         moonless_minutes += step_minutes
-                else:
-                    moonless_minutes += step_minutes
 
         astro_hrs = astro_minutes/60.0
         moonless_hrs = moonless_minutes/60.0
@@ -309,7 +309,7 @@ def main():
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
 
-    # Row for City Input, Date Range, and Deviation (Mins)
+    # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
     input_cols = st.columns(3)
     with input_cols[0]:
@@ -337,21 +337,30 @@ def main():
             [st.session_state["start_date"], st.session_state["end_date"]],
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        if len(dvals) == 1:
-            st.session_state["start_date"] = dvals[0]
-            st.session_state["end_date"] = dvals[0]
-        elif len(dvals) == 2:
-            start, end = dvals
-            delta_days = (end - start).days + 1
-            if delta_days > MAX_DAYS:
-                adjusted_end = start + timedelta(days=MAX_DAYS -1)
-                st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-                st.session_state["start_date"] = start
-                st.session_state["end_date"] = adjusted_end
+        if isinstance(dvals, list):
+            if len(dvals) == 1:
+                st.session_state["start_date"] = dvals[0]
+                st.session_state["end_date"] = dvals[0]
+            elif len(dvals) == 2:
+                start, end = dvals
+                delta_days = (end - start).days + 1
+                if delta_days > MAX_DAYS:
+                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
+                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+                    st.session_state["start_date"] = start
+                    st.session_state["end_date"] = adjusted_end
+                elif start > end:
+                    st.warning("Start date must be before or equal to end date.")
+                else:
+                    st.session_state["start_date"], st.session_state["end_date"] = start, end
             else:
-                st.session_state["start_date"], st.session_state["end_date"] = start, end
+                st.warning("Please select either a single date or a valid date range.")
         else:
-            st.warning("Please select either a single date or a valid date range.")
+            if isinstance(dvals, date):
+                st.session_state["start_date"] = dvals
+                st.session_state["end_date"] = dvals
+            else:
+                st.warning("Please select either a single date or a valid date range.")
 
     with input_cols[2]:
         # Allowed Deviation Minutes Selector
@@ -377,9 +386,9 @@ def main():
         )
         # Removed the ⓘ tooltip icon completely
 
-    # Row for Latitude and Longitude
-    st.markdown("#### Coordinates")
-    coord_cols = st.columns(2)
+    # Row for Latitude, Longitude, and Moon Influence Dropdown
+    st.markdown("#### Coordinates & Moon Influence")
+    coord_cols = st.columns(3)
     with coord_cols[0]:
         lat_in = st.number_input(
             "Latitude",
@@ -400,53 +409,20 @@ def main():
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
 
-    # No Moon Checkbox
-    st.markdown("####")
-    no_moon = st.checkbox(
-        "No Moon",
-        value=False,
-        help="Exclude times when the Moon is above the horizon, ensuring truly dark skies with no moonlight."
-    )
+    with coord_cols[2]:
+        # Moon Influence Dropdown
+        moon_options = [
+            "Include Moonlight",
+            "Ignore Moonlight"
+        ]
+        moon_affect = st.selectbox(
+            "Moon Influence on Darkness",
+            options=moon_options,
+            index=0,
+            help="Choose whether to include the moon's effect on astronomical darkness."
+        )
 
-    # Map in expander
-    with st.expander("Pick on Map (optional)", expanded=False):
-        st.markdown("####")
-        st.write("Click on the map to select lat/lon. If city search is ON, we will also reverse geocode to update the City field.")
-        default_loc = [st.session_state["lat"], st.session_state["lon"]]
-        f_map = folium.Map(location=default_loc, zoom_start=5, width="100%")
-        folium.TileLayer("OpenStreetMap").add_to(f_map)
-        f_map.add_child(folium.LatLngPopup())
-
-        map_result = st_folium(f_map, width=800, height=500)
-        if map_result and map_result.get("last_clicked"):
-            clat = map_result["last_clicked"]["lat"]
-            clng = map_result["last_clicked"]["lng"]
-            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            if USE_CITY_SEARCH:
-                cfound = reverse_geocode(clat, clng)
-                if cfound:
-                    st.success(f"Reverse geocoded city: {cfound}")
-                    st.session_state["city"] = cfound
-                else:
-                    st.warning("City not found from reverse geocode.")
-
-    # Progress Console (Full Width)
-    st.markdown("#### Progress Console")
-    console_placeholder = st.empty()
-    console_placeholder.text_area(
-        "",
-        value=st.session_state["progress_console"],
-        height=150,
-        max_chars=None,
-        key="progress_console_display",
-        disabled=True,
-        help="Progress Console displaying calculation steps.",
-        label_visibility="collapsed"
-    )
-
-    # Calculate Button
+    # Calculate Button and Progress Bar (Moved Above Progress Console)
     st.markdown("####")
     calculate_button = st.button("Calculate")
 
@@ -454,6 +430,20 @@ def main():
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
+
+    # Progress Console (Full Width)
+    st.markdown("#### Progress Console")
+    console_placeholder = st.empty()
+    console_placeholder.text_area(
+        "Progress Console",
+        value=st.session_state["progress_console"],
+        height=150,
+        max_chars=None,
+        key="progress_console_display",  # Ensure this key is unique and used only once
+        disabled=True,
+        help="Progress Console displaying calculation steps.",
+        label_visibility="collapsed"
+    )
 
     # Check day range
     delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
@@ -483,7 +473,7 @@ def main():
             st.session_state["lon"],
             st.session_state["start_date"],
             st.session_state["end_date"],
-            no_moon,
+            moon_affect,
             step_min,
             progress_bar
         )
@@ -529,17 +519,40 @@ def main():
         st.dataframe(df)
 
     # Update the console box with the latest debug messages
-    with console_placeholder.container():
-        console_placeholder.text_area(
-            "",
-            value=st.session_state["progress_console"],
-            height=150,
-            max_chars=None,
-            key="progress_console_display_update",  # Ensure this key is unique and not reused elsewhere
-            disabled=True,
-            help="Progress Console displaying calculation steps.",
-            label_visibility="collapsed"
-        )
+    console_placeholder.text_area(
+        "Progress Console",
+        value=st.session_state["progress_console"],
+        height=150,
+        max_chars=None,
+        key="progress_console_display",  # Ensure this key is unique and used only once
+        disabled=True,
+        help="Progress Console displaying calculation steps.",
+        label_visibility="collapsed"
+    )
+
+    # Map in expander
+    with st.expander("Pick on Map (optional)", expanded=False):
+        st.markdown("####")
+        st.write("Click on the map to select lat/lon. If city search is ON, we will also reverse geocode to update the City field.")
+        default_loc = [st.session_state["lat"], st.session_state["lon"]]
+        f_map = folium.Map(location=default_loc, zoom_start=5, width="100%")
+        folium.TileLayer("OpenStreetMap").add_to(f_map)
+        f_map.add_child(folium.LatLngPopup())
+
+        map_result = st_folium(f_map, width=800, height=500)
+        if map_result and map_result.get("last_clicked"):
+            clat = map_result["last_clicked"]["lat"]
+            clng = map_result["last_clicked"]["lng"]
+            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
+            st.session_state["lat"] = clat
+            st.session_state["lon"] = clng
+            if USE_CITY_SEARCH:
+                cfound = reverse_geocode(clat, clng)
+                if cfound:
+                    st.success(f"Reverse geocoded city: {cfound}")
+                    st.session_state["city"] = cfound
+                else:
+                    st.warning("City not found from reverse geocode.")
 
 if __name__=="__main__":
     main()
