@@ -354,26 +354,34 @@ def main():
             st.warning("Please select either a single date or a valid date range.")
 
     with input_cols[2]:
-        # Allowed Deviation Minutes Selector
-        step_options = {
-            "1 Minute": 1,
-            "2 Minutes": 2,
-            "5 Minutes": 5,
-            "15 Minutes": 15,
-            "30 Minutes": 30
-        }
-        step_minutes = st.selectbox(
-            "Deviation (Mins)",
-            options=list(step_options.keys()),
-            index=0,
-            help="Select how precise the calculation should be. Higher minutes reduce calculation time but are less accurate."
-        )
-        # Tooltip explanation
-        st.markdown(f"""
-        <span title="Higher values like 5 or 15 minutes make the calculations faster but less precise, helping to save on computational resources. Lower values like 1 minute are more accurate but take longer, especially over many days.">
-        &#9432;
-        </span>
-        """, unsafe_allow_html=True)
+        # Allowed Deviation Minutes Selector with Improved Tooltip
+        sub_cols = st.columns([4,1])  # Allocate more space to the selectbox
+        with sub_cols[0]:
+            step_options = {
+                "1 Minute": 1,
+                "2 Minutes": 2,
+                "5 Minutes": 5,
+                "15 Minutes": 15,
+                "30 Minutes": 30
+            }
+            step_minutes = st.selectbox(
+                "Deviation (Mins)",
+                options=list(step_options.keys()),
+                index=0,
+                help="Select how precise the calculation should be. Higher minutes reduce calculation time but are less accurate."
+            )
+        with sub_cols[1]:
+            # New Tooltip Icon with Improved Text
+            st.markdown(f"""
+            <span title="This setting determines how precise the calculation times are, measured in minutes. 
+            - **Higher values** (like 5 or 15 minutes) make calculations faster but less exact, saving processing time.
+            - **Lower values** (like 1 minute) make calculations more accurate but take longer, especially for longer date ranges.
+            Choose the level of accuracy that suits your needs: 
+            - **1 minute** for short periods
+            - **5 minutes or more** for longer durations.">
+            &#9432;
+            </span>
+            """, unsafe_allow_html=True)
 
     # Row for Latitude and Longitude
     st.markdown("#### Coordinates")
@@ -527,9 +535,6 @@ def main():
         st.dataframe(df)
 
     # Update the console box with the latest debug messages
-    if "progress_console_display_update" not in st.session_state:
-        st.session_state["progress_console_display_update"] = ""
-
     with console_placeholder.container():
         console_placeholder.text_area(
             "",
