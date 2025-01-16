@@ -19,6 +19,7 @@ import requests
 import folium
 from streamlit_folium import st_folium
 from skyfield.api import load, Topos
+from time import sleep
 
 ########################################
 # PAGE CONFIG + Custom CSS
@@ -46,11 +47,11 @@ st.markdown("""
 def debug_print(msg: str):
     if DEBUG:
         # Append the message to the console box
-        st.session_state["debug_console"] += msg + "\n"
+        st.session_state["progress_console"] += msg + "\n"
         # Limit the console to the last 5 lines
-        lines = st.session_state["debug_console"].split("\n")
+        lines = st.session_state["progress_console"].split("\n")
         if len(lines) > 5:
-            st.session_state["debug_console"] = "\n".join(lines[-5:])
+            st.session_state["progress_console"] = "\n".join(lines[-5:])
 
 def moon_phase_icon(phase_deg):
     """Return an emoji for the moon phase."""
@@ -143,16 +144,16 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     # If dark end wasn't found on the same day, set it to "-"
     if found_start and end_str == "-":
         end_str = "-"
-    
+
     return (start_str, end_str)
 
 ########################################
 # Astro Calculation
 ########################################
-@st.cache_data
-def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
-    debug_print(f"lat={lat:.4f}, lon={lon:.4f}, city={st.session_state['city']}, range={start_date}..{end_date}, no_moon={no_moon}, step_minutes={step_minutes}")
-
+def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, console_placeholder, progress_placeholder):
+    """
+    Performs the astronomical darkness calculations and updates the progress console and progress bar.
+    """
     ts = load.timescale()
     eph = load('de421.bsp')
     debug_print("Loaded timescale & ephemeris")
@@ -162,7 +163,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
     if not tz_name:
         tz_name = "UTC"
     local_tz = pytz.timezone(tz_name)
-    debug_print(f"local_tz={tz_name}")
+    debug_print(f"Local Timezone: {tz_name}")
 
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
     observer = eph['Earth'] + topos
@@ -181,14 +182,26 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
     day_count = 0
     current = start_date
 
-    # Pre-fetch the next day's sun altitudes for accurate dark end time
-    next_day = end_date + timedelta(days=1)
-    sun_alts_next_day = []
-    moon_alts_next_day = []
-    times_list_next_day = []
+    total_days = (end_date - start_date).days + 1
+    for _ in range(total_days):
+        if day_count >= MAX_DAYS:
+            break
 
-    while current <= end_date and day_count < MAX_DAYS:
         debug_print(f"Processing day {day_count + 1}: {current}")
+        console_placeholder.text_area(
+            "",
+            value=st.session_state["progress_console"],
+            height=100,
+            max_chars=None,
+            key="progress_console_display",
+            disabled=True,
+            help="Progress Console displaying calculation steps.",
+            label_visibility="collapsed"
+        )
+
+        # Update progress bar
+        progress = (day_count) / MAX_DAYS
+        progress_placeholder.progress(progress)
 
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -267,8 +280,15 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
             "moon_phase": moon_phase_icon(phase_angle)
         })
 
-        current += timedelta(days=1)
+        # Update progress
         day_count += 1
+        progress = (day_count) / MAX_DAYS
+        progress_placeholder.progress(progress)
+        sleep(0.1)  # Simulate time-consuming calculation
+
+    # Final update to progress bar
+    progress_placeholder.progress(100)
+    progress_placeholder.empty()
 
     return day_results
 
@@ -287,11 +307,11 @@ def main():
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
     if "start_date" not in st.session_state:
-        st.session_state["start_date"] = date(2025,10,15)
+        st.session_state["start_date"] = date.today()
     if "end_date" not in st.session_state:
-        st.session_state["end_date"] = date(2025,10,16)
-    if "debug_console" not in st.session_state:
-        st.session_state["debug_console"] = ""
+        st.session_state["end_date"] = date.today() + timedelta(days=1)
+    if "progress_console" not in st.session_state:
+        st.session_state["progress_console"] = ""
 
     # Row for city + date
     row1_col1, row1_col2 = st.columns([2,1])
@@ -402,16 +422,16 @@ def main():
     # Initialize a container for the console and progress bar
     console_container = st.container()
     with console_container:
-        st.markdown("#### Debug Console")
-        console_box = st.empty()
-        console_box.text_area(
+        st.markdown("#### Progress Console")
+        console_placeholder = st.empty()
+        console_placeholder.text_area(
             "",
-            value=st.session_state["debug_console"],
+            value=st.session_state["progress_console"],
             height=100,
             max_chars=None,
-            key="debug_console_box",
+            key="progress_console_display",
             disabled=True,
-            help="Console output for debugging purposes.",
+            help="Progress Console displaying calculation steps.",
             label_visibility="collapsed"
         )
 
@@ -459,7 +479,7 @@ def main():
             return
 
         # Reset console
-        st.session_state["debug_console"] = ""
+        st.session_state["progress_console"] = ""
 
         # Convert step_minutes selection to integer
         step_min = step_options[step_minutes]
@@ -468,17 +488,19 @@ def main():
         progress_bar.progress(0)
         progress_text.text("Starting calculations...")
 
-        # Perform calculations
+        # Perform calculations with real-time updates
         daily_data = compute_day_details(
             st.session_state["lat"],
             st.session_state["lon"],
             st.session_state["start_date"],
             st.session_state["end_date"],
             no_moon,
-            step_min
+            step_min,
+            console_placeholder,
+            progress_bar
         )
 
-        # Update Progress Bar to 100%
+        # Final update to progress bar
         progress_bar.progress(100)
         progress_text.text("Calculations completed.")
 
@@ -514,14 +536,14 @@ def main():
 
     # Update the console box with the latest debug messages
     with console_container:
-        console_box.text_area(
+        console_placeholder.text_area(
             "",
-            value=st.session_state["debug_console"],
+            value=st.session_state["progress_console"],
             height=100,
             max_chars=None,
-            key="debug_console_box_update",
+            key="progress_console_display_update",
             disabled=True,
-            help="Console output for debugging purposes.",
+            help="Progress Console displaying calculation steps.",
             label_visibility="collapsed"
         )
 
