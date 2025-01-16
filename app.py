@@ -4,7 +4,7 @@
 
 ########## CONFIGURATION-BLOCK ##########
 MAX_DAYS = 30
-STEP_MINUTES = 1
+STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
 DEBUG = True
 LOCATIONIQ_TOKEN = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
@@ -19,6 +19,7 @@ import requests
 import folium
 from streamlit_folium import st_folium
 from skyfield.api import load, Topos
+from time import sleep
 
 ########################################
 # PAGE CONFIG + Custom CSS
@@ -29,13 +30,17 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox 
+# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
 st.markdown("""
 <style>
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
         margin-bottom: 5px;
+    }
+    /* Fixed-width font for Progress Console */
+    textarea {
+        font-family: "Courier New", Courier, monospace;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -45,7 +50,8 @@ st.markdown("""
 ########################################
 def debug_print(msg: str):
     if DEBUG:
-        st.write(msg)
+        # Append the message to the progress console
+        st.session_state["progress_console"] += msg + "\n"
 
 def moon_phase_icon(phase_deg):
     """Return an emoji for the moon phase."""
@@ -135,29 +141,34 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
             end_str = dt_loc.strftime("%H:%M")
             break
 
-    # If dark end wasn't found on the same day, it might be on the next day.
+    # If dark end wasn't found on the same day, attempt to find it on the next day
     if found_start and end_str == "-":
-        end_str = times_list[-1].utc_datetime().astimezone(local_tz).strftime("%H:%M")
+        for i in range(N-1):
+            if sun_alts[i] < -18 and sun_alts[i+1] >= -18:
+                dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
+                end_str = dt_loc.strftime("%H:%M")
+                break
 
     return (start_str, end_str)
 
 ########################################
 # Astro Calculation
 ########################################
-@st.cache_data
-def compute_day_details(lat, lon, start_date, end_date, no_moon):
-    debug_print("DEBUG: Entering compute_day_details")
-
+def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar):
+    """
+    Performs the astronomical darkness calculations and updates the progress console and progress bar.
+    Returns the day-by-day results.
+    """
     ts = load.timescale()
     eph = load('de421.bsp')
-    debug_print("DEBUG: Loaded timescale & ephemeris")
+    debug_print("Loaded timescale & ephemeris")
 
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
         tz_name = "UTC"
     local_tz = pytz.timezone(tz_name)
-    debug_print(f"DEBUG: local_tz={tz_name}")
+    debug_print(f"Local Timezone: {tz_name}")
 
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
     observer = eph['Earth'] + topos
@@ -172,19 +183,21 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         alt_m, _, _ = app_moon.altaz()
         return alt_m.degrees
 
-    max_days = MAX_DAYS
     day_results = []
     day_count = 0
     current = start_date
 
-    # Pre-fetch the next day's sun altitudes for accurate dark end time
-    next_day = end_date + timedelta(days=1)
-    sun_alts_next_day = []
-    moon_alts_next_day = []
-    times_list_next_day = []
+    total_days = (end_date - start_date).days + 1
+    for _ in range(total_days):
+        if day_count >= MAX_DAYS:
+            debug_print(f"Reached maximum day limit of {MAX_DAYS}.")
+            break
 
-    while current <= end_date and day_count < max_days:
-        debug_print(f"DEBUG: day {day_count}, date={current}")
+        debug_print(f"Processing day {day_count + 1}: {current}")
+
+        # Update progress bar
+        progress = (day_count + 1) / MAX_DAYS
+        progress_bar.progress(progress)
 
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -194,10 +207,10 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
 
-        step_count = (24*60)//STEP_MINUTES
+        step_count = (24*60)//step_minutes
         times_list = []
         for i in range(step_count+1):
-            dt_utc = start_utc + timedelta(minutes=i*STEP_MINUTES)
+            dt_utc = start_utc + timedelta(minutes=i*step_minutes)
             times_list.append(ts.from_datetime(dt_utc))
 
         sun_alts = []
@@ -215,53 +228,19 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
             s_mid = (sun_alts[i] + sun_alts[i+1])/2
             m_mid = (moon_alts[i] + moon_alts[i+1])/2
             if s_mid < -18.0:  # astro dark
-                astro_minutes += STEP_MINUTES
-                if no_moon:
-                    if m_mid < 0.0:
-                        moonless_minutes += STEP_MINUTES
+                astro_minutes += step_minutes
+                if moon_affect == "Ignore Moonlight":
+                    moonless_minutes += step_minutes
                 else:
-                    moonless_minutes += STEP_MINUTES
+                    if m_mid < 0.0:
+                        moonless_minutes += step_minutes
 
         astro_hrs = astro_minutes/60.0
         moonless_hrs = moonless_minutes/60.0
-        debug_print(f"DEBUG: date={current}, astro_hrs={astro_hrs:.2f}, moonless_hrs={moonless_hrs:.2f}")
+        debug_print(f"astro_hrs={astro_hrs:.2f}, moonless_hrs={moonless_hrs:.2f}")
 
         # crossing-based times
         dark_start_str, dark_end_str = find_dark_crossings(sun_alts, times_list, local_tz)
-
-        # If dark_end_str is on the next day, fetch it from the next day's times_list
-        if dark_end_str == times_list[-1].utc_datetime().astimezone(local_tz).strftime("%H:%M"):
-            # Fetch next day's data if not already fetched
-            if current < next_day:
-                next_local_mid = datetime(next_day.year, next_day.month, next_day.day, 0, 0, 0)
-                next_local_next = next_local_mid + timedelta(days=1)
-                next_start_aware = local_tz.localize(next_local_mid)
-                next_end_aware = local_tz.localize(next_local_next)
-                next_start_utc = next_start_aware.astimezone(pytz.utc)
-                next_end_utc = next_end_aware.astimezone(pytz.utc)
-
-                next_times_list = []
-                for i in range(step_count+1):
-                    dt_utc = next_start_utc + timedelta(minutes=i*STEP_MINUTES)
-                    next_times_list.append(ts.from_datetime(dt_utc))
-
-                for t_ in next_times_list:
-                    s_alt = sun_alt_deg(t_)
-                    m_alt = moon_alt_deg(t_)
-                    sun_alts_next_day.append(s_alt)
-                    moon_alts_next_day.append(m_alt)
-                    times_list_next_day.append(t_)
-
-            # Find the first dark end time on the next day
-            dark_end_str = "-"
-            for i in range(len(sun_alts_next_day)-1):
-                if sun_alts_next_day[i] < -18 and sun_alts_next_day[i+1] >= -18:
-                    dt_loc = times_list_next_day[i+1].utc_datetime().astimezone(local_tz)
-                    dark_end_str = dt_loc.strftime("%H:%M")
-                    break
-            # If still not found, set to "-"
-            if dark_end_str == "-":
-                dark_end_str = "07:02"  # Fallback time or keep as "-"
 
         # Moon rise/set
         m_rise_str = "-"
@@ -280,7 +259,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
         local_noon_aware = local_tz.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
-        t_noon = load.timescale().from_datetime(noon_utc)
+        t_noon = ts.from_datetime(noon_utc)
         obs_noon = observer.at(t_noon)
         sun_ecl = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
         moon_ecl = obs_noon.observe(eph['Moon']).apparent().ecliptic_latlon()
@@ -300,6 +279,13 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
         current += timedelta(days=1)
         day_count += 1
 
+        # Simulate processing time (remove or adjust in production)
+        sleep(0.1)
+
+    # Final update to progress bar
+    progress_bar.progress(100)
+    debug_print("All calculations completed.")
+
     return day_results
 
 ########################################
@@ -307,7 +293,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon):
 ########################################
 def main():
     st.title("Astronomical Darkness Calculator")
-    st.subheader("Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
+    st.markdown("##### Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
 
     # Initialize session defaults if missing
     if "city" not in st.session_state:
@@ -317,14 +303,16 @@ def main():
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
     if "start_date" not in st.session_state:
-        st.session_state["start_date"] = date(2025,10,15)
+        st.session_state["start_date"] = date.today()
     if "end_date" not in st.session_state:
-        st.session_state["end_date"] = date(2025,10,16)
+        st.session_state["end_date"] = date.today() + timedelta(days=1)
+    if "progress_console" not in st.session_state:
+        st.session_state["progress_console"] = ""
 
-    # Row for city + date
-    row1_col1, row1_col2 = st.columns([2,1])
-    with row1_col1:
-        st.subheader("City Input")
+    # Row for City Input, Date Range, and Time Accuracy
+    st.markdown("#### Inputs")
+    input_cols = st.columns(3)
+    with input_cols[0]:
         if USE_CITY_SEARCH:
             cval = st.text_input(
                 "City (optional)",
@@ -332,93 +320,84 @@ def main():
                 help="Enter a city name to look up lat/lon from LocationIQ (e.g. 'London')."
             )
             if cval != st.session_state["city"]:
-                # user typed a new city
+                # User typed a new city
                 coords = geocode_city(cval)
                 if coords:
                     st.session_state["lat"], st.session_state["lon"] = coords
                     st.session_state["city"] = cval
                 else:
                     st.warning("City not found or blocked. Check spelling or usage limits.")
-            # else no changes
         else:
             st.write("City search is OFF")
 
-    with row1_col2:
-        st.subheader("Date Range")
-        # === Modified Date Selector Starts Here ===
+    with input_cols[1]:
+        # Date Range Selector
         dvals = st.date_input(
             f"Pick up to {MAX_DAYS} days",
             [st.session_state["start_date"], st.session_state["end_date"]],
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        if len(dvals) == 1:
-            st.session_state["start_date"] = dvals[0]
-            st.session_state["end_date"] = dvals[0]
-        elif len(dvals) == 2:
-            start, end = dvals
-            delta_days = (end - start).days + 1
-            if delta_days > MAX_DAYS:
-                st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {start + timedelta(days=MAX_DAYS -1)}.")
-                st.session_state["start_date"] = start
-                st.session_state["end_date"] = start + timedelta(days=MAX_DAYS -1)
-            else:
-                st.session_state["start_date"], st.session_state["end_date"] = start, end
-        else:
-            st.warning("Please select either a single date or a valid date range.")
-        # === Modified Date Selector Ends Here ===
-
-    # Row for lat/lon
-    st.subheader("Lat/Lon")
-    row2_col1, row2_col2 = st.columns(2)
-    with row2_col1:
-        lat_in = st.number_input(
-            "Latitude",
-            value=st.session_state["lat"],
-            format="%.6f",
-            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
-        )
-        if abs(lat_in - st.session_state["lat"]) > 1e-8:
-            st.session_state["lat"] = lat_in
-
-    with row2_col2:
-        lon_in = st.number_input(
-            "Longitude",
-            value=st.session_state["lon"],
-            format="%.6f",
-            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
-        )
-        if abs(lon_in - st.session_state["lon"]) > 1e-8:
-            st.session_state["lon"] = lon_in
-
-    # No Moon
-    no_moon = st.checkbox(
-        "No Moon",
-        value=False,
-        help="Exclude times when the Moon is above the horizon, ensuring truly dark skies with no moonlight."
-    )
-
-    # Map in expander
-    with st.expander("Pick on Map (optional)", expanded=False):
-        st.write("Click on the map to select lat/lon. If city search is ON, we will also reverse geocode to update the City field.")
-        default_loc = [st.session_state["lat"], st.session_state["lon"]]
-        f_map = folium.Map(location=default_loc, zoom_start=5, width="100%")
-        folium.TileLayer("OpenStreetMap").add_to(f_map)
-        f_map.add_child(folium.LatLngPopup())
-
-        map_result = st_folium(f_map, width=800, height=500)
-        if map_result and map_result.get("last_clicked"):
-            clat = map_result["last_clicked"]["lat"]
-            clng = map_result["last_clicked"]["lng"]
-            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            if USE_CITY_SEARCH:
-                cfound = reverse_geocode(clat, clng)
-                if cfound:
-                    st.success(f"Reverse geocoded city: {cfound}")
-                    st.session_state["city"] = cfound
+        # Adjusted to check for both list and tuple
+        if isinstance(dvals, (list, tuple)):
+            if len(dvals) == 1:
+                st.session_state["start_date"] = dvals[0]
+                st.session_state["end_date"] = dvals[0]
+            elif len(dvals) == 2:
+                start, end = dvals
+                delta_days = (end - start).days + 1
+                if delta_days > MAX_DAYS:
+                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
+                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+                    st.session_state["start_date"] = start
+                    st.session_state["end_date"] = adjusted_end
+                elif start > end:
+                    st.warning("Start date must be before or equal to end date.")
                 else:
-                    st.warning("City not found from reverse geocode.")
+                    st.session_state["start_date"], st.session_state["end_date"] = start, end
+            else:
+                st.warning("Please select either a single date or a valid date range.")
+        else:
+            if isinstance(dvals, date):
+                st.session_state["start_date"] = dvals
+                st.session_state["end_date"] = dvals
+            else:
+                st.warning("Please select either a single date or a valid date range.")
+
+    with input_cols[2]:
+        # Time Accuracy Dropdown
+        moon_options = [
+            "Include Moonlight",
+            "Ignore Moonlight"
+        ]
+        moon_affect = st.selectbox(
+            "Moon Influence on Darkness",
+            options=moon_options,
+            index=0,
+            help="Choose whether to include the moon's effect on astronomical darkness."
+        )
+
+    # Calculate Button and Progress Bar (Moved Above Progress Console)
+    st.markdown("####")
+    calculate_button = st.button("Calculate")
+
+    # Progress Bar Placeholder
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+    progress_text = st.empty()
+
+    # Progress Console (Full Width)
+    st.markdown("#### Progress Console")
+    console_placeholder = st.empty()
+    console_placeholder.text_area(
+        "Progress Console",
+        value=st.session_state["progress_console"],
+        height=150,
+        max_chars=None,
+        key="progress_console_display",  # Ensure this key is unique and used only once
+        disabled=True,
+        help="Progress Console displaying calculation steps.",
+        label_visibility="collapsed"
+    )
 
     # Check day range
     delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
@@ -427,19 +406,42 @@ def main():
         return
 
     # Calculate
-    if st.button("Calculate"):
+    if calculate_button:
         if st.session_state["start_date"] > st.session_state["end_date"]:
             st.error("Start date must be <= end date.")
             return
 
-        debug_print(f"DEBUG: lat={st.session_state['lat']:.4f}, lon={st.session_state['lon']:.4f}, city={st.session_state['city']}, range={st.session_state['start_date']}..{st.session_state['end_date']}, no_moon={no_moon}")
+        # Reset console
+        st.session_state["progress_console"] = ""
+
+        # Convert step_minutes selection to integer
+        step_min = {
+            "1 Minute": 1,
+            "2 Minutes": 2,
+            "5 Minutes": 5,
+            "15 Minutes": 15,
+            "30 Minutes": 30
+        }[STEP_MINUTES]
+
+        # Start Progress Bar
+        progress_bar.progress(0)
+        progress_text.text("Starting calculations...")
+
+        # Perform calculations with real-time updates
         daily_data = compute_day_details(
             st.session_state["lat"],
             st.session_state["lon"],
             st.session_state["start_date"],
             st.session_state["end_date"],
-            no_moon
+            moon_affect,
+            step_min,
+            progress_bar
         )
+
+        # Final update to progress bar
+        progress_bar.progress(100)
+        progress_text.text("Calculations completed.")
+
         if not daily_data:
             st.warning("No data?? Possibly 0-day range or an error.")
             return
@@ -447,14 +449,20 @@ def main():
         total_astro = sum(d["astro_dark_hours"] for d in daily_data)
         total_moonless = sum(d["moonless_hours"] for d in daily_data)
 
-        st.subheader("Results")
-        cA, cB = st.columns(2)
-        with cA:
-            st.success(f"Total Astronomical Darkness: {total_astro:.2f} hrs")
-        with cB:
-            st.success(f"Moonless Darkness: {total_moonless:.2f} hrs")
+        st.markdown("#### Results")
+        result_cols = st.columns(2)
+        with result_cols[0]:
+            st.markdown(
+                f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
+                unsafe_allow_html=True
+            )
+        with result_cols[1]:
+            st.markdown(
+                f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
+                unsafe_allow_html=True
+            )
 
-        st.subheader("Day-by-Day Breakdown")
+        st.markdown("#### Day-by-Day Breakdown")
         df = pd.DataFrame(daily_data)
         df = df.rename(columns={
             "date": "Date",
@@ -466,10 +474,10 @@ def main():
             "moon_set": "Moonset",
             "moon_phase": "Phase"
         })
-        # remove row index
-        df.index = df.index.map(lambda x: "")
+        # Remove row index by resetting index and dropping it
+        df.reset_index(drop=True, inplace=True)
         st.dataframe(df)
 
-
+# Run the app
 if __name__=="__main__":
     main()
