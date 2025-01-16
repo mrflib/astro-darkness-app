@@ -363,7 +363,7 @@ def main():
             "30 Minutes": 30
         }
         step_minutes = st.selectbox(
-            "Deviation (Mins)",
+            "Time Accuracy (Mins)",
             options=list(step_options.keys()),
             index=0,
             help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
