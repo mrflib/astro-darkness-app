@@ -1,2 +1,8 @@
 streamlit
 skyfield
+geopy
+folium
+streamlit-folium
+pytz
+timezonefinder
+requests
