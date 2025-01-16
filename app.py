@@ -293,7 +293,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, p
 ########################################
 def main():
     st.title("Astronomical Darkness Calculator")
-    st.markdown("#### Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
+    st.markdown("##### Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
 
     # Initialize session defaults if missing
     if "city" not in st.session_state:
@@ -368,11 +368,11 @@ def main():
             index=0,
             help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
 - **Higher values** (like 5 or 15 minutes) make calculations faster but less precise, saving computational resources.
-- **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges.
+- **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges. 
 
 **Choose the level of accuracy that suits your needs:**
-- **1 minute** for short periods (a few days)
-- **5 minutes or more** for longer durations (multiple weeks)
+- **1 minute** for short periods (a few days) e.g. for 1 min If moonrise is 17:28, it will show 17:28.
+- **5 minutes or more** for longer durations (multiple weeks) e.g. for 5 mins If moonrise is 17:28, it will show 17:30.
 """
         )
         # Removed the ⓘ tooltip icon completely
