@@ -302,15 +302,25 @@ def main():
     with row1_col2:
         st.subheader("Date Range")
         dvals = st.date_input(
-            f"Pick up to {MAX_DAYS} days",
-            [st.session_state["start_date"], st.session_state["end_date"]],
-            help="Select 1 or 2 dates. e.g. 2025-10-14 to 2025-10-19"
-        )
-        if len(dvals)==1:
-            st.session_state["start_date"] = dvals[0]
-            st.session_state["end_date"] = dvals[0]
-        else:
-            st.session_state["start_date"], st.session_state["end_date"] = dvals[0], dvals[-1]
+    f"Pick up to {MAX_DAYS} days",
+    [st.session_state["start_date"], st.session_state["end_date"]],
+    min_value=date.today() - timedelta(days=365 * 5),  # 5 years in the past
+    max_value=date.today() + timedelta(days=MAX_DAYS),
+    help=f"Select a date range of up to {MAX_DAYS} days."
+)
+
+if len(dvals) == 2:
+    range_days = (dvals[-1] - dvals[0]).days + 1
+    if range_days > MAX_DAYS:
+        st.warning(f"Please select a range of up to {MAX_DAYS} days.")
+        st.session_state["start_date"] = dvals[0]
+        st.session_state["end_date"] = dvals[0] + timedelta(days=MAX_DAYS - 1)
+    else:
+        st.session_state["start_date"], st.session_state["end_date"] = dvals[0], dvals[-1]
+else:
+    st.session_state["start_date"] = dvals[0]
+    st.session_state["end_date"] = dvals[0]
+
 
     # Row for lat/lon
     st.subheader("Lat/Lon")
