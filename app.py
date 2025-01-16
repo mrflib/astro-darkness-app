@@ -141,18 +141,22 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
             end_str = dt_loc.strftime("%H:%M")
             break
 
-    # If dark end wasn't found on the same day, set it to "-"
+    # If dark end wasn't found on the same day, attempt to find it on the next day
     if found_start and end_str == "-":
-        end_str = "-"
-    
+        for i in range(N-1):
+            if sun_alts[i] < -18 and sun_alts[i+1] >= -18:
+                dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
+                end_str = dt_loc.strftime("%H:%M")
+                break
+
     return (start_str, end_str)
 
 ########################################
 # Astro Calculation
 ########################################
-def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
+def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes, progress_bar):
     """
-    Performs the astronomical darkness calculations and updates the progress console.
+    Performs the astronomical darkness calculations and updates the progress console and progress bar.
     Returns the day-by-day results.
     """
     ts = load.timescale()
@@ -186,13 +190,14 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
     total_days = (end_date - start_date).days + 1
     for _ in range(total_days):
         if day_count >= MAX_DAYS:
+            debug_print(f"Reached maximum day limit of {MAX_DAYS}.")
             break
 
         debug_print(f"Processing day {day_count + 1}: {current}")
 
         # Update progress bar
-        progress = (day_count) / MAX_DAYS
-        st.progress(progress)
+        progress = (day_count + 1) / MAX_DAYS
+        progress_bar.progress(progress)
 
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -254,7 +259,7 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
         local_noon_aware = local_tz.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
-        t_noon = load.timescale().from_datetime(noon_utc)
+        t_noon = ts.from_datetime(noon_utc)
         obs_noon = observer.at(t_noon)
         sun_ecl = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
         moon_ecl = obs_noon.observe(eph['Moon']).apparent().ecliptic_latlon()
@@ -274,8 +279,12 @@ def compute_day_details(lat, lon, start_date, end_date, no_moon, step_minutes):
         current += timedelta(days=1)
         day_count += 1
 
+        # Simulate processing time (remove or adjust in production)
+        sleep(0.1)
+
     # Final update to progress bar
-    st.progress(100)
+    progress_bar.progress(100)
+    debug_print("All calculations completed.")
 
     return day_results
 
@@ -410,8 +419,8 @@ def main():
     console_container = st.container()
     with console_container:
         st.markdown("#### Progress Console")
+        # Initialize the console display once with a unique key
         console_placeholder = st.empty()
-        # Initialize the console display
         console_placeholder.text_area(
             "",
             value=st.session_state["progress_console"],
@@ -450,8 +459,9 @@ def main():
         </span>
         """, unsafe_allow_html=True)
 
-    # Progress Bar
-    progress_bar = st.progress(0)
+    # Progress Bar Placeholder
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
 
     # Check day range
@@ -483,7 +493,8 @@ def main():
             st.session_state["start_date"],
             st.session_state["end_date"],
             no_moon,
-            step_min
+            step_min,
+            progress_bar
         )
 
         # Final update to progress bar
@@ -527,7 +538,7 @@ def main():
             value=st.session_state["progress_console"],
             height=100,
             max_chars=None,
-            key="progress_console_display_update",
+            key="progress_console_display_update",  # Ensure this key is unique and not reused
             disabled=True,
             help="Progress Console displaying calculation steps.",
             label_visibility="collapsed"
