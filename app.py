@@ -1,5 +1,5 @@
 # app.py - Full code with line numbers
-# -----------------------------------------------------
+# ------------------------------------------------------
 
 # (1) Imports
 import streamlit as st                              # line 1
