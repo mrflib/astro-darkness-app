@@ -363,53 +363,6 @@ def main():
                 st.warning("Please select either a single date or a valid date range.")
 
     with input_cols[2]:
-        # Allowed Deviation Minutes Selector
-        step_options = {
-            "1 Minute": 1,
-            "2 Minutes": 2,
-            "5 Minutes": 5,
-            "15 Minutes": 15,
-            "30 Minutes": 30
-        }
-        step_minutes = st.selectbox(
-            "Time Accuracy (Mins)",
-            options=list(step_options.keys()),
-            index=0,
-            help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
-- **Higher values** (like 5 or 15 minutes) make calculations faster but less precise, saving computational resources.
-- **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges. 
-
-**Choose the level of accuracy that suits your needs:**
-- **1 minute** for short periods (a few days) e.g. for 1 min If moonrise is 17:28, it will show 17:28.
-- **5 minutes or more** for longer durations (multiple weeks) e.g. for 5 mins If moonrise is 17:28, it will show 17:30.
-"""
-        )
-        # Removed the ⓘ tooltip icon completely
-
-    # Row for Latitude, Longitude, and Moon Influence Dropdown
-    st.markdown("#### Coordinates & Moon Influence")
-    coord_cols = st.columns(3)
-    with coord_cols[0]:
-        lat_in = st.number_input(
-            "Latitude",
-            value=st.session_state["lat"],
-            format="%.6f",
-            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
-        )
-        if abs(lat_in - st.session_state["lat"]) > 1e-8:
-            st.session_state["lat"] = lat_in
-
-    with coord_cols[1]:
-        lon_in = st.number_input(
-            "Longitude",
-            value=st.session_state["lon"],
-            format="%.6f",
-            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
-        )
-        if abs(lon_in - st.session_state["lon"]) > 1e-8:
-            st.session_state["lon"] = lon_in
-
-    with coord_cols[2]:
         # Moon Influence Dropdown
         moon_options = [
             "Include Moonlight",
@@ -439,7 +392,7 @@ def main():
         value=st.session_state["progress_console"],
         height=150,
         max_chars=None,
-        key="progress_console_display",  # Ensure this key is unique and used only once
+        key="progress_console_display",
         disabled=True,
         help="Progress Console displaying calculation steps.",
         label_visibility="collapsed"
@@ -461,7 +414,13 @@ def main():
         st.session_state["progress_console"] = ""
 
         # Convert step_minutes selection to integer
-        step_min = step_options[step_minutes]
+        step_min = {
+            "1 Minute": 1,
+            "2 Minutes": 2,
+            "5 Minutes": 5,
+            "15 Minutes": 15,
+            "30 Minutes": 30
+        }[step_minutes]
 
         # Start Progress Bar
         progress_bar.progress(0)
