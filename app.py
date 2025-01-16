@@ -30,17 +30,13 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
+# Enlarge the “No Moon” checkbox 
 st.markdown("""
 <style>
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
         margin-bottom: 5px;
-    }
-    /* Fixed-width font for Progress Console */
-    textarea {
-        font-family: "Courier New", Courier, monospace;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -51,9 +47,11 @@ st.markdown("""
 def debug_print(msg: str):
     if DEBUG:
         # Append the message to the progress console
-        if "progress_console" not in st.session_state:
-            st.session_state["progress_console"] = ""
         st.session_state["progress_console"] += msg + "\n"
+        # Limit the console to the last 5 lines
+        lines = st.session_state["progress_console"].split("\n")
+        if len(lines) > 5:
+            st.session_state["progress_console"] = "\n".join(lines[-5:])
 
 def moon_phase_icon(phase_deg):
     """Return an emoji for the moon phase."""
@@ -339,32 +337,21 @@ def main():
             [st.session_state["start_date"], st.session_state["end_date"]],
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        # Handle date selection
-        if isinstance(dvals, list):
-            if len(dvals) == 1:
-                st.session_state["start_date"] = dvals[0]
-                st.session_state["end_date"] = dvals[0]
-            elif len(dvals) == 2:
-                start, end = dvals
-                delta_days = (end - start).days + 1
-                if delta_days > MAX_DAYS:
-                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
-                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-                    st.session_state["start_date"] = start
-                    st.session_state["end_date"] = adjusted_end
-                elif start > end:
-                    st.warning("Start date must be before or equal to end date.")
-                else:
-                    st.session_state["start_date"], st.session_state["end_date"] = start, end
+        if len(dvals) == 1:
+            st.session_state["start_date"] = dvals[0]
+            st.session_state["end_date"] = dvals[0]
+        elif len(dvals) == 2:
+            start, end = dvals
+            delta_days = (end - start).days + 1
+            if delta_days > MAX_DAYS:
+                adjusted_end = start + timedelta(days=MAX_DAYS -1)
+                st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+                st.session_state["start_date"] = start
+                st.session_state["end_date"] = adjusted_end
             else:
-                st.warning("Please select either a single date or a valid date range.")
+                st.session_state["start_date"], st.session_state["end_date"] = start, end
         else:
-            # If dvals is not a list, handle single date selection
-            if isinstance(dvals, date):
-                st.session_state["start_date"] = dvals
-                st.session_state["end_date"] = dvals
-            else:
-                st.warning("Please select either a single date or a valid date range.")
+            st.warning("Please select either a single date or a valid date range.")
 
     with input_cols[2]:
         # Allowed Deviation Minutes Selector
@@ -445,7 +432,21 @@ def main():
                 else:
                     st.warning("City not found from reverse geocode.")
 
-    # Calculate Button and Progress Bar (Moved Above Progress Console)
+    # Progress Console (Full Width)
+    st.markdown("#### Progress Console")
+    console_placeholder = st.empty()
+    console_placeholder.text_area(
+        "",
+        value=st.session_state["progress_console"],
+        height=150,
+        max_chars=None,
+        key="progress_console_display",
+        disabled=True,
+        help="Progress Console displaying calculation steps.",
+        label_visibility="collapsed"
+    )
+
+    # Calculate Button
     st.markdown("####")
     calculate_button = st.button("Calculate")
 
@@ -453,20 +454,6 @@ def main():
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
-
-    # Progress Console (Full Width)
-    st.markdown("#### Progress Console")
-    console_placeholder = st.empty()
-    console_placeholder.text_area(
-        "Progress Console",
-        value=st.session_state["progress_console"],
-        height=150,
-        max_chars=None,
-        key="progress_console_display",  # Ensure this key is unique and used only once
-        disabled=True,
-        help="Progress Console displaying calculation steps.",
-        label_visibility="collapsed"
-    )
 
     # Check day range
     delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
@@ -541,8 +528,18 @@ def main():
         df.reset_index(drop=True, inplace=True)
         st.dataframe(df)
 
-    # No duplicate text_area calls below
-    # The console_placeholder.text_area has already been defined above
+    # Update the console box with the latest debug messages
+    with console_placeholder.container():
+        console_placeholder.text_area(
+            "",
+            value=st.session_state["progress_console"],
+            height=150,
+            max_chars=None,
+            key="progress_console_display_update",  # Ensure this key is unique and not reused elsewhere
+            disabled=True,
+            help="Progress Console displaying calculation steps.",
+            label_visibility="collapsed"
+        )
 
 if __name__=="__main__":
     main()
