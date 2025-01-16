@@ -7,7 +7,7 @@
 MAX_DAYS = 30         # how many days to allow
 STEP_MINUTES = 1     # how many minutes between each step (default 60 = 1-hour)
 USE_CITY_SEARCH = True # toggle city input on or off
-DEBUG = True           # set to False if you want to hide debug prints
+DEBUG = False           # set to False if you want to hide debug prints
 
 ############################
 # END CONFIGURATION BLOCK
