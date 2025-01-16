@@ -30,7 +30,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox 
+# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
 st.markdown("""
 <style>
     .stCheckbox > div:first-child {
@@ -39,7 +39,7 @@ st.markdown("""
         margin-bottom: 5px;
     }
     /* Fixed-width font for Progress Console */
-    .fixed-width {
+    textarea {
         font-family: "Courier New", Courier, monospace;
     }
 </style>
@@ -422,151 +422,4 @@ def main():
         folium.TileLayer("OpenStreetMap").add_to(f_map)
         f_map.add_child(folium.LatLngPopup())
 
-        map_result = st_folium(f_map, width=800, height=500)
-        if map_result and map_result.get("last_clicked"):
-            clat = map_result["last_clicked"]["lat"]
-            clng = map_result["last_clicked"]["lng"]
-            st.info(f"Clicked lat={clat:.4f}, lon={clng:.4f}")
-            st.session_state["lat"] = clat
-            st.session_state["lon"] = clng
-            if USE_CITY_SEARCH:
-                cfound = reverse_geocode(clat, clng)
-                if cfound:
-                    st.success(f"Reverse geocoded city: {cfound}")
-                    st.session_state["city"] = cfound
-                else:
-                    st.warning("City not found from reverse geocode.")
-
-    # Calculate Button and Progress Bar (Moved Above Progress Console)
-    st.markdown("####")
-    calculate_button = st.button("Calculate")
-
-    # Progress Bar Placeholder
-    progress_placeholder = st.empty()
-    progress_bar = progress_placeholder.progress(0)
-    progress_text = st.empty()
-
-    # Progress Console (Full Width)
-    st.markdown("#### Progress Console")
-    console_placeholder = st.empty()
-    # Fixed-width font and auto-scroll functionality
-    console_placeholder.text_area(
-        "",
-        value=st.session_state["progress_console"],
-        height=150,
-        max_chars=None,
-        key="progress_console_display",
-        disabled=True,
-        help="Progress Console displaying calculation steps.",
-        label_visibility="collapsed",
-        # Apply fixed-width font via CSS class
-    )
-    # Inject CSS to set fixed-width font for the text_area
-    st.markdown("""
-    <style>
-    textarea {
-        font-family: "Courier New", Courier, monospace;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Check day range
-    delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
-    if delta_days > MAX_DAYS:
-        st.error(f"Please pick {MAX_DAYS} days or fewer.")
-        return
-
-    # Calculate
-    if calculate_button:
-        if st.session_state["start_date"] > st.session_state["end_date"]:
-            st.error("Start date must be <= end date.")
-            return
-
-        # Reset console
-        st.session_state["progress_console"] = ""
-
-        # Convert step_minutes selection to integer
-        step_min = step_options[step_minutes]
-
-        # Start Progress Bar
-        progress_bar.progress(0)
-        progress_text.text("Starting calculations...")
-
-        # Perform calculations with real-time updates
-        daily_data = compute_day_details(
-            st.session_state["lat"],
-            st.session_state["lon"],
-            st.session_state["start_date"],
-            st.session_state["end_date"],
-            no_moon,
-            step_min,
-            progress_bar
-        )
-
-        # Final update to progress bar
-        progress_bar.progress(100)
-        progress_text.text("Calculations completed.")
-
-        if not daily_data:
-            st.warning("No data?? Possibly 0-day range or an error.")
-            return
-
-        total_astro = sum(d["astro_dark_hours"] for d in daily_data)
-        total_moonless = sum(d["moonless_hours"] for d in daily_data)
-
-        st.markdown("#### Results")
-        result_cols = st.columns(2)
-        with result_cols[0]:
-            st.markdown(
-                f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
-                unsafe_allow_html=True
-            )
-        with result_cols[1]:
-            st.markdown(
-                f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
-                unsafe_allow_html=True
-            )
-
-        st.markdown("#### Day-by-Day Breakdown")
-        df = pd.DataFrame(daily_data)
-        df = df.rename(columns={
-            "date": "Date",
-            "astro_dark_hours": "Astro (hrs)",
-            "moonless_hours": "Moonless (hrs)",
-            "dark_start": "Dark Start",
-            "dark_end": "Dark End",
-            "moon_rise": "Moonrise",
-            "moon_set": "Moonset",
-            "moon_phase": "Phase"
-        })
-        # Remove row index by resetting index and dropping it
-        df.reset_index(drop=True, inplace=True)
-        st.dataframe(df)
-
-    # Update the console box with the latest debug messages
-    # Force the text_area to show the latest content by updating the key
-    if "progress_console_display_update" not in st.session_state:
-        st.session_state["progress_console_display_update"] = ""
-
-    with console_placeholder.container():
-        console_placeholder.text_area(
-            "",
-            value=st.session_state["progress_console"],
-            height=150,
-            max_chars=None,
-            key="progress_console_display_update",  # Dynamically updated key to force re-render
-            disabled=True,
-            help="Progress Console displaying calculation steps.",
-            label_visibility="collapsed"
-        )
-        # Inject CSS to set fixed-width font for the text_area within the container
-        st.markdown("""
-        <style>
-        textarea {
-            font-family: "Courier New", Courier, monospace;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-if __name__=="__main__":
-    main()
+        map_result = 
