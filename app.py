@@ -55,13 +55,7 @@ with input_cols[2]:
         "Deviation (Mins)",
         options=list(step_options.keys()),
         index=0,
-        help="This setting determines how precise the calculation times are, measured in minutes.
-- **Higher values** (like 5 or 15 minutes) make calculations faster but less exact, saving processing time.
-- **Lower values** (like 1 minute) make calculations more accurate but take longer, especially for longer date ranges.
-Choose the level of accuracy that suits your needs:
-- **1 minute** for short periods
-- **5 minutes or more** for longer durations.
-"
+        help="This setting determines how precise the calculation times are, measured in minutes. Higher values (like 5 or 15 minutes) make calculations faster but less exact, saving processing time. Lower values** (like 1 minute) make calculations more accurate but take longer, especially for longer date ranges."
     )
     # Tooltip explanation
     st.markdown(f"""
