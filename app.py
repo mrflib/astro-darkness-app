@@ -2,7 +2,7 @@
 # app.py
 ############################
 
-########## CONFIGURATION BLOCK ##########
+########## CONFIGURATION-BLOCK ##########
 MAX_DAYS = 30
 STEP_MINUTES = 1
 USE_CITY_SEARCH = True
