@@ -317,9 +317,9 @@ if len(dvals) == 2:
         st.session_state["end_date"] = dvals[0] + timedelta(days=MAX_DAYS - 1)
     else:
         st.session_state["start_date"], st.session_state["end_date"] = dvals[0], dvals[-1]
-else:
-    st.session_state["start_date"] = dvals[0]
-    st.session_state["end_date"] = dvals[0]
+    else:
+        st.session_state["start_date"] = dvals[0]
+        st.session_state["end_date"] = dvals[0]
 
 
     # Row for lat/lon
