@@ -10,6 +10,7 @@ DEBUG = True
 
 import streamlit as st
 from datetime import date, datetime, timedelta
+import time  # We'll use time.sleep(...) for forcing partial updates
 import requests
 import pytz
 from timezonefinder import TimezoneFinder
@@ -27,7 +28,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Additional custom CSS for button hover/active in #218838, progress bar same color, form styling, etc.
+# Additional custom CSS
 st.markdown(r"""
 <style>
 /* The "Calculate" button normal, hover, active states => #218838 */
@@ -106,7 +107,7 @@ def moon_phase_icon(phase_deg):
         return "🌘"
 
 def geocode_city(city_name, token):
-    """City -> (lat, lon) using LocationIQ /v1/search. Returns None if not found."""
+    """City -> (lat, lon) using LocationIQ /v1/search."""
     if not USE_CITY_SEARCH or not city_name.strip():
         return None
     url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
@@ -127,7 +128,7 @@ def geocode_city(city_name, token):
     return None
 
 def reverse_geocode(lat, lon, token):
-    """(lat, lon)->city from LocationIQ /v1/reverse. Returns None if not found."""
+    """(lat, lon)->city from LocationIQ /v1/reverse."""
     if not USE_CITY_SEARCH:
         return None
     url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
@@ -150,22 +151,15 @@ def reverse_geocode(lat, lon, token):
 def compute_night_details(
     lat, lon,
     start_date, end_date,
-    twilight_threshold,  # e.g. 6 for civil, 12 for nautical, 18 for astro
+    twilight_threshold,
     step_minutes,
-    pbar                # <--- pass in the progress bar so we can update it each day
+    pbar
 ):
     """
     For each local day from local noon->noon, label it "Night of D".
-    We count:
-      - astro_minutes if sun_alt < -twilight_threshold
-      - moonless_minutes if also moon_alt < 0
-    Then find crossing times for:
-      - Dark Start, Dark End (sun crossing -twilight_threshold)
-      - Moon Rise, Moon Set (moon crossing 0)
-    Return a list of dicts with columns:
-      [Night, Dark Start, Dark End, Moon Rise, Moon Set, 
-       Dark Hours, Moonless Hours, Phase]
-    We'll also update 'pbar' once per day to show partial progress.
+    Then sum times with sun_alt < -twilight_threshold, and also track 
+    moonless subset. We'll update 'pbar' each day, pausing briefly
+    so the UI can render partial updates.
     """
     from skyfield.api import load, Topos
     ts = load.timescale()
@@ -187,9 +181,12 @@ def compute_night_details(
     total_days = (end_date - start_date).days + 1
 
     for i in range(total_days):
-        # Update the progress bar fraction
+        # Update progress fraction for day i
         fraction = (i + 1) / total_days
         pbar.progress(fraction)
+
+        # *Force a tiny pause* so Streamlit sees the partial progress
+        time.sleep(0.1)
 
         day_label = start_date + timedelta(days=i)
         debug_print(f"Processing 'Night of {day_label}' (noon->noon).")
@@ -210,7 +207,7 @@ def compute_night_details(
         times_list = []
         sun_alts = []
         moon_alts = []
-
+        
         for s in range(steps+1):
             dt_utc = start_utc + timedelta(minutes=s*step_minutes)
             tsky = ts.from_datetime(dt_utc)
@@ -224,7 +221,6 @@ def compute_night_details(
         astro_minutes = 0
         moonless_minutes = 0
         for idx in range(len(times_list)-1):
-            # Sun < -threshold
             if sun_alts[idx] < -twilight_threshold:
                 astro_minutes += step_minutes
                 if moon_alts[idx] < 0.0:
@@ -237,11 +233,11 @@ def compute_night_details(
         moon_set   = "-"
 
         for idx in range(len(sun_alts)-1):
-            # crossing from >= -threshold to < -threshold => dark start
+            # crossing from >= -th to < -th => dark start
             if sun_alts[idx] >= -twilight_threshold and sun_alts[idx+1] < -twilight_threshold and dark_start == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 dark_start = dt_loc.strftime("%H:%M")
-            # crossing from < -threshold to >= -threshold => dark end
+            # crossing from < -th to >= -th => dark end
             if sun_alts[idx] < -twilight_threshold and sun_alts[idx+1] >= -twilight_threshold and dark_end == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 dark_end = dt_loc.strftime("%H:%M")
@@ -256,7 +252,6 @@ def compute_night_details(
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 moon_set = dt_loc.strftime("%H:%M")
 
-        # Convert sums to "Xhrs Ymin"
         a_hrs = astro_minutes // 60
         a_min = astro_minutes % 60
         astro_str = f"{a_hrs}hrs {a_min}min"
@@ -266,11 +261,13 @@ def compute_night_details(
         moonl_str = f"{m_hrs}hrs {m_min}min"
 
         # moon phase at local noon
+        from skyfield.api import load
         t_noon = ts.from_datetime(local_noon_aware.astimezone(pytz.utc))
         obs_noon = observer.at(t_noon)
         sun_ecl  = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
         moon_ecl = obs_noon.observe(eph['Moon']).apparent().ecliptic_latlon()
         phase_angle = (moon_ecl[1].degrees - sun_ecl[1].degrees) % 360
+        from math import fmod
         phase_emoji = moon_phase_icon(phase_angle)
 
         nights_data.append({
@@ -294,7 +291,6 @@ def main():
 
     st.write("Either enter a city, lat/long, or click the map, then pick date range & press Calculate.")
 
-    # Session defaults
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "city" not in st.session_state:
@@ -310,7 +306,7 @@ def main():
 
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
-    # Row for city/lat/lon
+    # top row
     st.markdown("#### Coordinates & City Input")
     top_cols = st.columns(3)
     with top_cols[0]:
@@ -354,7 +350,10 @@ def main():
     st.markdown("#### Location on Map")
     st.write("You may need to click the map a few times to make it work! Free API fun! :)")
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
-    folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Current").add_to(fol_map)
+    folium.Marker(
+        [st.session_state["lat"], st.session_state["lon"]], 
+        popup="Current"
+    ).add_to(fol_map)
     map_res = st_folium(fol_map, width=700, height=450)
     if map_res and "last_clicked" in map_res and map_res["last_clicked"]:
         clat = map_res["last_clicked"]["lat"]
@@ -371,7 +370,7 @@ def main():
                     st.success(f"Map => lat/lon=({clat:.4f}, {clon:.4f})")
                 st.session_state["last_map_click"] = (clat, clon)
 
-    # Next row (form) for date range, threshold, time step
+    # Next row
     st.markdown("### Calculate Darkness")
     with st.form("calc_form"):
         row2 = st.columns(3)
@@ -433,10 +432,10 @@ def main():
         debug_print("Starting night-labeled calculations...")
 
         # Show progress bar
-        pbar_holder = st.empty()
-        pbar = pbar_holder.progress(0)
+        progress_placeholder = st.empty()
+        progress_bar = progress_placeholder.progress(0)
 
-        # Pass the progress bar to the function
+        # Pass progress_bar to the function
         nights_data = compute_night_details(
             st.session_state["lat"],
             st.session_state["lon"],
@@ -444,7 +443,7 @@ def main():
             end_d,
             twilight_threshold,
             step_minutes,
-            pbar  # <--- pass pbar here
+            progress_bar  # pass the bar object
         )
 
         if not nights_data:
