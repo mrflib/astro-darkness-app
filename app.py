@@ -336,15 +336,7 @@ def main():
             key="selected_dates",
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-
-        # Update 'selected_dates' in session state based on user selection
-        if isinstance(dvals, list) or isinstance(dvals, tuple):
-            if len(dvals) == 1:
-                st.session_state["selected_dates"] = [dvals[0], dvals[0]]
-            elif len(dvals) >=2:
-                st.session_state["selected_dates"] = [dvals[0], dvals[-1]]
-        elif isinstance(dvals, date):
-            st.session_state["selected_dates"] = [dvals, dvals]
+        # **Important:** Do **not** modify `st.session_state["selected_dates"]` after widget instantiation
 
     with input_cols[2]:
         # Allowed Deviation Minutes Selector
@@ -430,10 +422,11 @@ def main():
     )
 
     # Check day range (after date selection)
-    if len(st.session_state["selected_dates"]) >= 2:
-        start_d, end_d = st.session_state["selected_dates"][:2]
+    selected_dates = st.session_state["selected_dates"]
+    if len(selected_dates) >= 2:
+        start_d, end_d = selected_dates[:2]
     else:
-        start_d = end_d = st.session_state["selected_dates"][0]
+        start_d = end_d = selected_dates[0]
     delta_days = (end_d - start_d).days + 1
     if delta_days > MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
@@ -442,23 +435,7 @@ def main():
     # Calculate Button Logic
     if calculate_button:
         # Extract the selected dates
-        dvals = st.session_state["selected_dates"]
-
-        if isinstance(dvals, (list, tuple)):
-            if len(dvals) == 1:
-                start_date = dvals[0]
-                end_date = dvals[0]
-            elif len(dvals) == 2:
-                start_date, end_date = dvals
-            else:
-                st.warning("Please select either a single date or a valid date range.")
-                st.stop()
-        elif isinstance(dvals, date):
-            start_date = dvals
-            end_date = dvals
-        else:
-            st.warning("Please select either a single date or a valid date range.")
-            st.stop()
+        start_date, end_date = selected_dates[:2] if len(selected_dates) >= 2 else (selected_dates[0], selected_dates[0])
 
         # Validate date range
         if start_date > end_date:
@@ -468,9 +445,9 @@ def main():
         delta_days = (end_date - start_date).days + 1
 
         if delta_days > MAX_DAYS:
-            adjusted_end = start_date + timedelta(days=MAX_DAYS - 1)
-            st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-            end_date = adjusted_end
+            # Don't modify 'selected_dates'; inform the user
+            st.warning(f"Selected range exceeds {MAX_DAYS} days. Please select a range within {MAX_DAYS} days.")
+            st.stop()
 
         # Proceed only if date range is valid
         if (start_date <= end_date) and (delta_days <= MAX_DAYS):
@@ -535,11 +512,24 @@ def main():
             df.reset_index(drop=True, inplace=True)
             st.dataframe(df)
 
-            # Reintroduce the Map in an Expander
-            with st.expander("View Map"):
-                folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
-                folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
-                st_folium(folium_map, width=700, height=500)
+    # Reintroduce the Map in an Expander (Always Accessible)
+    with st.expander("View Map"):
+        folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
+        folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
+        map_click = st_folium(folium_map, width=700, height=500)
+
+        if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
+            lat_clicked, lon_clicked = map_click['last_clicked']['lat'], map_click['last_clicked']['lng']
+            # Update session state
+            st.session_state["lat"] = lat_clicked
+            st.session_state["lon"] = lon_clicked
+            # Perform reverse geocoding to get city
+            city = reverse_geocode(lat_clicked, lon_clicked)
+            if city:
+                st.session_state["city"] = city
+                st.success(f"Location updated to {city} ({lat_clicked:.4f}, {lon_clicked:.4f})")
+            else:
+                st.warning("City not found for the selected location.")
 
 # Run the app
 if __name__=="__main__":
