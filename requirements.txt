@@ -8,3 +8,4 @@ folium
 streamlit-folium
 pillow>=9.5.0
 streamlit>=1.25.0  # Bumped or pinned to 1.25.0 or later
+streamlit-date-picker==0.0.3
