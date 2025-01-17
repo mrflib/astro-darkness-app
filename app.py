@@ -29,9 +29,10 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
+# Custom CSS for styling result boxes and other elements
 st.markdown("""
 <style>
+    /* Enlarge the checkbox */
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
@@ -43,7 +44,7 @@ st.markdown("""
     }
     /* Style for result boxes */
     .result-box {
-        background-color: #28a745; /* Bootstrap green */
+        background-color: #28a745; /* Green background */
         color: white;
         border-radius: 15px;
         padding: 20px;
@@ -93,7 +94,7 @@ def moon_phase_icon(phase_deg):
 # LocationIQ city + reverse
 ########################################
 def geocode_city(city_name, token):
-    """City->(lat,lon) with LocationIQ /v1/search."""
+    """City -> (lat, lon) using LocationIQ /v1/search."""
     if not USE_CITY_SEARCH or not city_name.strip():
         return None
     url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
@@ -114,7 +115,7 @@ def geocode_city(city_name, token):
     return None
 
 def reverse_geocode(lat, lon, token):
-    """(lat,lon)-> city with LocationIQ /v1/reverse."""
+    """(lat, lon) -> city using LocationIQ /v1/reverse."""
     if not USE_CITY_SEARCH:
         return None
     url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
@@ -146,13 +147,13 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     found_start = False
 
     for i in range(N-1):
-        # crossing from alt >= -18 -> < -18 => dark start
+        # Crossing from alt >= -18 -> < -18 => dark start
         if sun_alts[i] >= -18 and sun_alts[i+1] < -18 and not found_start:
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             start_str = dt_loc.strftime("%H:%M")
             found_start = True
-        # crossing from alt < -18 -> >= -18 => dark end
-        elif sun_alts[i] < -18 and sun_alts[i+1] >= -18 and found_start and end_str=="-":
+        # Crossing from alt < -18 -> >= -18 => dark end
+        elif sun_alts[i] < -18 and sun_alts[i+1] >= -18 and found_start and end_str == "-":
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             end_str = dt_loc.strftime("%H:%M")
             break
@@ -219,7 +220,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         progress = (day_count + 1) / MAX_DAYS
         progress_bar.progress(min(progress, 1.0))
 
-        # local midnight -> next local midnight
+        # Local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
         try:
@@ -266,7 +267,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         moonless_mins = moonless_minutes % 60
         debug_print(f"astro_hrs={astro_hrs}, astro_mins={astro_mins}, moonless_hrs={moonless_hrs}, moonless_mins={moonless_mins}")
 
-        # crossing-based times
+        # Crossing-based times
         dark_start_str, dark_end_str = find_dark_crossings(sun_alts, times_list, local_tz)
 
         # Moon rise/set
@@ -392,8 +393,8 @@ def main():
 - **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges. 
 
 **Choose the level of accuracy that suits your needs:**
-- **1 minute** for short periods (a few days) e.g. for 1 min If moonrise is 17:28, it will show 17:28.
-- **5 minutes or more** for longer durations (multiple weeks) e.g. for 5 mins If moonrise is 17:28, it will show 17:30.
+- **1 minute** for short periods (a few days) e.g. If moonrise is 17:28, it will show 17:28.
+- **5 minutes or more** for longer durations (multiple weeks) e.g. If moonrise is 17:28, it will show 17:30.
 """
         )
         # Removed the ⓘ tooltip icon completely
