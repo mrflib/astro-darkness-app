@@ -2,7 +2,7 @@
 # app.py
 ############################
 
-########## CONFIGURATION-BLOCK ##########
+########## CONFIGURATION--BLOCK ##########
 MAX_DAYS = 30
 STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
