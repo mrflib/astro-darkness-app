@@ -7,7 +7,6 @@ MAX_DAYS = 30
 STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
 DEBUG = True
-# Removed hardcoded LOCATIONIQ_TOKEN
 ######## END CONFIG BLOCK ###############
 
 import streamlit as st
@@ -576,19 +575,9 @@ def main():
             })
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
-            # Attempt to hide the index
-            if hasattr(pd.DataFrame.style, 'hide_index'):
-                styled_df = df.style.hide_index()
-                st.dataframe(styled_df)
-            else:
-                # Convert to HTML without index
-                def hide_dataframe_row_index(df):
-                    return df.to_html(index=False)
+            # Convert to HTML without index
+            html_table = df.to_html(index=False)
+            st.markdown(html_table, unsafe_allow_html=True)
 
-                html_table = hide_dataframe_row_index(df)
-                st.markdown(html_table, unsafe_allow_html=True)
-                st.warning("Your Pandas version does not support 'hide_index()'. The index column is displayed.")
-
-# Run the app
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
