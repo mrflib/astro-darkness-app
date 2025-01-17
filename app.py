@@ -139,7 +139,7 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     """
     Return (dark_start_str, dark_end_str) by scanning from >=-18 -> < -18 for start,
     then < -18 -> >= -18 for end. If dark_end is not found on the same day, it assumes
-    dark_end occurs on the next day.
+    dark_end occurs on the next day and returns the time accordingly.
     """
     N = len(sun_alts)
     start_str = "-"
@@ -251,8 +251,8 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         astro_minutes = 0
         moonless_minutes = 0
         for i in range(len(times_list)-1):
-            s_mid = (sun_alts[i] + sun_alts[i+1]) / 2
-            m_mid = (moon_alts[i] + moon_alts[i+1]) / 2
+            s_mid = (sun_alts[i] + sun_alts[i+1])/2
+            m_mid = (moon_alts[i] + moon_alts[i+1])/2
             if s_mid < -18.0:  # astro dark
                 astro_minutes += step_minutes
                 if moon_affect == "Ignore Moonlight":
@@ -341,6 +341,7 @@ def main():
     if "last_click" not in st.session_state:
         st.session_state["last_click"] = None
 
+    # Retrieve the LocationIQ token from secrets
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
     # Row for City Input, Date Range, and Time Accuracy
@@ -365,14 +366,13 @@ def main():
             st.write("City search is OFF")
 
     with input_cols[1]:
-        # REMOVED type="range" to avoid error in older Streamlit.
-        # NOTE: Without "type=range", the date picker will close after choosing the first date.
-        # This is a Streamlit limitation on older versions.
+        # ADDED type="range" (requires Streamlit >= 1.25)
         st.date_input(
             f"Pick up to {MAX_DAYS} days",
             value=st.session_state["selected_dates"],
             key="selected_dates",
-            help=f"Select a date range of up to {MAX_DAYS} days. (Due to Streamlit limitations, you'll need to re-open the calendar to pick the second date.)"
+            help=f"Select a date range of up to {MAX_DAYS} days in one go.",
+            type="range"
         )
 
     with input_cols[2]:
@@ -388,8 +388,8 @@ def main():
             options=list(step_options.keys()),
             index=0,
             help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
-- **Higher values** (like 5 or 15) are faster but less precise.
-- **Lower values** (like 1) are more accurate but slower.
+- Higher values (5 or 15) are faster but less precise.
+- Lower values (1 or 2) are more accurate but slower.
 """
         )
 
@@ -403,7 +403,7 @@ def main():
             format="%.6f",
             min_value=-90.0,
             max_value=90.0,
-            help="Latitude in decimal degrees."
+            help="Latitude in decimal degrees (e.g., 51.5074)."
         )
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
@@ -415,7 +415,7 @@ def main():
             format="%.6f",
             min_value=-180.0,
             max_value=180.0,
-            help="Longitude in decimal degrees."
+            help="Longitude in decimal degrees (e.g., -0.1278)."
         )
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
@@ -432,8 +432,9 @@ def main():
             help="Choose whether to include the moon's effect on astronomical darkness."
         )
 
+    # Map Section
     st.markdown("#### Select Location on Map")
-    st.markdown("<h5>Click on the map once to set a new location.</h5>", unsafe_allow_html=True)
+    st.markdown("<h5>Click the map once to set a new location (single-click).</h5>", unsafe_allow_html=True)
     with st.expander("View Map"):
         folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
         folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
@@ -442,13 +443,14 @@ def main():
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
             clicked_lat = map_click['last_clicked']['lat']
             clicked_lon = map_click['last_clicked']['lng']
+            # Validate coords
             if not (-90.0 <= clicked_lat <= 90.0):
                 st.warning(f"Clicked latitude {clicked_lat} is out of bounds (-90 to 90).")
             elif not (-180.0 <= clicked_lon <= 180.0):
                 st.warning(f"Clicked longitude {clicked_lon} is out of bounds (-180 to 180).")
             else:
                 current_click = (clicked_lat, clicked_lon)
-                # REMOVED the "two-click" check:
+                # REMOVED two-click check
                 st.session_state["lat"], st.session_state["lon"] = current_click
                 city = reverse_geocode(clicked_lat, clicked_lon, LOCATIONIQ_TOKEN)
                 if city:
@@ -461,10 +463,12 @@ def main():
     st.markdown("####")
     calculate_button = st.button("Calculate")
 
+    # Progress bar placeholders
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
 
+    # Console
     st.markdown("#### Progress Console")
     console_placeholder = st.empty()
     console_placeholder.text_area(
@@ -474,14 +478,15 @@ def main():
         max_chars=None,
         key="progress_console_display",
         disabled=True,
-        help="Progress Console displaying calculation steps.",
         label_visibility="collapsed"
     )
 
+    # Date Range Extraction
     selected_dates = st.session_state["selected_dates"]
-    if len(selected_dates) >= 2:
-        start_d, end_d = selected_dates[:2]
+    if len(selected_dates) == 2:
+        start_d, end_d = selected_dates
     else:
+        # If user somehow only picks 1 date, fallback
         start_d = end_d = selected_dates[0]
 
     delta_days = (end_d - start_d).days + 1
@@ -489,21 +494,26 @@ def main():
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         st.stop()
 
+    # Calculate on button click
     if calculate_button:
-        start_date, end_date = start_d, end_d
-        if start_date > end_date:
+        if start_d > end_d:
             st.error("Start date must be <= end date.")
             st.stop()
 
-        delta_days = (end_date - start_date).days + 1
         if delta_days > MAX_DAYS:
             st.warning(f"Selected range exceeds {MAX_DAYS} days. Please select a range within {MAX_DAYS} days.")
             st.stop()
 
-        # Reset console
+        # Reset the console
         st.session_state["progress_console"] = ""
 
-        step_min = step_options[step_minutes]
+        step_min = {
+            "1 Minute": 1,
+            "2 Minutes": 2,
+            "5 Minutes": 5,
+            "15 Minutes": 15,
+            "30 Minutes": 30
+        }[step_minutes]
 
         progress_bar.progress(0)
         progress_text.text("Starting calculations...")
@@ -511,8 +521,8 @@ def main():
         daily_data = compute_day_details(
             st.session_state["lat"],
             st.session_state["lon"],
-            start_date,
-            end_date,
+            start_d,
+            end_d,
             moon_affect,
             step_min,
             progress_bar,
@@ -529,12 +539,15 @@ def main():
         total_astro = 0
         total_moonless = 0
         for d in daily_data:
+            # Parse "0 Hours 23 Minutes" strings
             astro_parts = d["astro_dark_hours"].split()
             astro_hours = int(astro_parts[0])
             astro_minutes = int(astro_parts[2])
+
             moonless_parts = d["moonless_hours"].split()
             moonless_hours = int(moonless_parts[0])
             moonless_minutes = int(moonless_parts[2])
+
             total_astro += astro_hours * 60 + astro_minutes
             total_moonless += moonless_hours * 60 + moonless_minutes
 
@@ -561,6 +574,7 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
         else:
+            # Center the box by creating three columns and placing the box in the middle
             empty_col1, main_col, empty_col2 = st.columns([1, 8, 1])
             with main_col:
                 st.markdown(f"""
