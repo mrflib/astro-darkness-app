@@ -2,10 +2,5 @@
 base="dark"
 primaryColor="#00B3A6"
 backgroundColor="#202123"
-secondaryBackgroundColor="#343541"
-textColor="#E8EAED"
-font="sans serif"
-
-[server]
-headless=true
-port=8501
+secondaryBackgroundColor="#31333F"
+textColor="#FAFAFA"
