@@ -3,9 +3,9 @@
 ############################
 
 ########## CONFIGURATION-BLOCK ##########
-MAX_DAYS = 30           # Max days user can pick
-USE_CITY_SEARCH = True  # Whether city name->lat/lon from LocationIQ is enabled
-DEBUG = True            # If True, log debug messages in session console
+MAX_DAYS = 30
+USE_CITY_SEARCH = True
+DEBUG = True
 ######## END CONFIG BLOCK ###############
 
 import streamlit as st
@@ -57,12 +57,12 @@ textarea {
 # UTILS
 ########################################
 def debug_print(msg: str):
-    """Append debug info to console if DEBUG is True."""
+    """Append debug info to session-based console if DEBUG is True."""
     if DEBUG:
         st.session_state["progress_console"] += msg + "\n"
 
 def moon_phase_icon(phase_deg):
-    """Return a Moon phase emoji based on ecliptic longitude difference."""
+    """Return an emoji for the moon phase based on ecliptic longitude difference."""
     x = phase_deg % 360
     if x < 22.5 or x >= 337.5:
         return "🌑"
@@ -103,7 +103,7 @@ def geocode_city(city_name, token):
     return None
 
 def reverse_geocode(lat, lon, token):
-    """(lat, lon)->city name from LocationIQ /v1/reverse. Returns None if not found."""
+    """(lat, lon)->city from LocationIQ /v1/reverse. Returns None if not found."""
     if not USE_CITY_SEARCH:
         return None
     url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
@@ -132,17 +132,16 @@ def compute_night_details(
     token
 ):
     """
-    For each local day in [start_date, end_date], define day D as local noon D->D+1,
-    label that block "Night of D". We sum:
-      - astro_minutes = sun < -18
-      - moonless_minutes = sun < -18 & moon < 0
-    Then decide which to present based on 'moon_affect'.
+    For each local day from local noon -> next local noon, 
+    label that block "Night of D" (where D is that local noon date).
+    We sum times sun<-18 for 'astro_minutes', plus times sun<-18 & moon<0 => 'moonless_minutes'.
+    Then depending on 'moon_affect':
+      - "Ignore Moon" => final astro = astro_minutes (bigger).
+      - "Subtract Moonlight" => final astro = moonless_minutes (smaller).
 
-    We also find the crossing times for:
-      - A.Start & A.End (sun altitude crossing -18)
-      - M.Rise & M.Set (moon altitude crossing 0)
-    Times are local.
-    If not found, we store "-".
+    We also find crossing times:
+      - A.Start & A.End (Sun crossing -18°)
+      - M.Rise & M.Set (Moon crossing 0°)
     """
     debug_print("Starting Night-labeled calculations...")
 
@@ -156,7 +155,7 @@ def compute_night_details(
         tz_name = "UTC"
     try:
         local_tz = pytz.timezone(tz_name)
-    except pytz.UnknownTimeZoneError:
+    except:
         local_tz = pytz.utc
         debug_print(f"Unknown tz for {lat},{lon}, using UTC.")
     debug_print(f"Local timezone: {tz_name}")
@@ -197,6 +196,7 @@ def compute_night_details(
             sky_t = ts.from_datetime(dt_utc)
             times_list.append(sky_t)
 
+            # alt deg
             sun_alt_deg = observer.at(sky_t).observe(eph['Sun']).apparent().altaz()[0].degrees
             moon_alt_deg = observer.at(sky_t).observe(eph['Moon']).apparent().altaz()[0].degrees
             sun_alts.append(sun_alt_deg)
@@ -205,50 +205,43 @@ def compute_night_details(
         # Summations
         astro_minutes = 0
         moonless_minutes = 0
-        for i in range(len(times_list)-1):
-            if sun_alts[i] < -18.0:
+        for idx in range(len(times_list)-1):
+            if sun_alts[idx] < -18.0:
                 astro_minutes += step_minutes
-                if moon_alts[i] < 0.0:
+                if moon_alts[idx] < 0.0:
                     moonless_minutes += step_minutes
 
         if moon_affect == "Ignore Moon":
-            # bigger total
             final_astro = astro_minutes
         else:
-            # "Subtract Moonlight" => smaller total
+            # "Subtract Moonlight"
             final_astro = moonless_minutes
 
         a_h = final_astro // 60
         a_m = final_astro % 60
 
-        # We also want crossing times: 
-        # A.Start => crossing from sun_alt >= -18 to < -18
-        # A.End   => crossing from sun_alt < -18 to >= -18
-        # M.Rise  => crossing from moon_alt < 0 to >= 0
-        # M.Set   => crossing from moon_alt >= 0 to < 0
+        # Crossings
         a_start_str = "-"
-        a_end_str = "-"
-        m_rise_str = "-"
-        m_set_str  = "-"
+        a_end_str   = "-"
+        m_rise_str  = "-"
+        m_set_str   = "-"
 
         for i in range(len(sun_alts)-1):
-            # Check astro start crossing
+            # A.Start crossing
             if sun_alts[i] >= -18.0 and sun_alts[i+1] < -18.0 and a_start_str == "-":
                 dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
                 a_start_str = dt_loc.strftime("%H:%M")
-
-            # Check astro end crossing
+            # A.End crossing
             if sun_alts[i] < -18.0 and sun_alts[i+1] >= -18.0 and a_end_str == "-":
                 dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
                 a_end_str = dt_loc.strftime("%H:%M")
 
         for i in range(len(moon_alts)-1):
-            # Check moon rise crossing
+            # M.Rise
             if moon_alts[i] < 0.0 and moon_alts[i+1] >= 0.0 and m_rise_str == "-":
                 dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
                 m_rise_str = dt_loc.strftime("%H:%M")
-
-            # Check moon set crossing
+            # M.Set
             if moon_alts[i] >= 0.0 and moon_alts[i+1] < 0.0 and m_set_str == "-":
                 dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
                 m_set_str = dt_loc.strftime("%H:%M")
@@ -262,14 +255,13 @@ def compute_night_details(
         phase_angle = (moon_ecl[1].degrees - sun_ecl[1].degrees) % 360
 
         nights_data.append({
-            "night_label": label_date.strftime("%Y-%m-%d"),
+            "Night": label_date.strftime("%Y-%m-%d"),
             "A.Start": a_start_str,
             "A.End":   a_end_str,
             "M.Rise":  m_rise_str,
             "M.Set":   m_set_str,
-            "astro_dark_hours": f"{a_h} Hours {a_m} Minutes",
-            "moonless_minutes": moonless_minutes,  # for optional reference
-            "moon_phase": moon_phase_icon(phase_angle)
+            "Astro(Hrs)": f"{a_h} Hours {a_m} Minutes",
+            "Phase": moon_phase_icon(phase_angle)
         })
 
     return nights_data
@@ -280,13 +272,11 @@ def compute_night_details(
 def main():
     st.markdown("<h2>Astronomical Darkness Calculator (Night-Labeled)</h2>", unsafe_allow_html=True)
     st.markdown("""
-    <h4>
-    This tool calculates how many hours of 'astro dark' (Sun below -18°) you get, 
-    labeling each night by the local noon date it starts (noon→noon). 
-    Perfect for planning extended nights without splitting at midnight!
-    </h4>
-    """, unsafe_allow_html=True)
+    **Either enter a city, or lat/long, or select a location on the map, 
+    then pick your date range and press Calculate.**
+    """)
 
+    # Prepare session defaults
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "city" not in st.session_state:
@@ -300,130 +290,129 @@ def main():
     if "last_map_click" not in st.session_state:
         st.session_state["last_map_click"] = None
 
-    # Retrieve secrets
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
-    # Use a form so the date widget won't re-run after every click
+    # ROW 1: city, lat, lon (all in the form)
     with st.form("main_form"):
-        st.write("**Inputs**")
-
-        # Row 1: city, date range, time step
         row1 = st.columns(3)
         with row1[0]:
             city_val = st.text_input(
                 "City (optional)",
                 value=st.session_state["city"],
-                help="Enter a city name. We'll try to find lat/lon if recognized."
+                help="Type a city name. We'll attempt to look up lat/lon if recognized."
             )
-
         with row1[1]:
-            # 2-element date input => single pop-up
-            dates_range = st.date_input(
-                "Pick up to 30 days (Night-labeled)",
-                value=st.session_state["dates_range"],
-                help="Select two dates in one pop-up. We'll handle each local day noon->noon."
-            )
-
-        with row1[2]:
-            step_opts = ["1", "2", "5", "10", "15", "30"]
-            step_mins_str = st.selectbox(
-                "Time Step (Mins)",
-                options=step_opts,
-                index=0,
-                help="Lower = more accurate, but slower. E.g. '1' => 1440 steps/day"
-            )
-            step_minutes = int(step_mins_str)
-
-        # Row 2: lat, lon, moon influence
-        row2 = st.columns(3)
-        with row2[0]:
             lat_in = st.number_input(
                 "Latitude",
                 value=st.session_state["lat"],
                 format="%.6f",
                 min_value=-90.0,
                 max_value=90.0,
-                help="Decimal degrees. E.g. 51.5074 for London."
+                help="Decimal degrees (e.g. 51.5074 for London)."
             )
-        with row2[1]:
+        with row1[2]:
             lon_in = st.number_input(
                 "Longitude",
                 value=st.session_state["lon"],
                 format="%.6f",
                 min_value=-180.0,
                 max_value=180.0,
-                help="Decimal degrees. E.g. -0.1278 for London."
+                help="Decimal degrees (e.g. -0.1278 for London)."
             )
-        with row2[2]:
-            # Two short labels
+
+        # ROW 2: date range, moon influence, time step
+        row2 = st.columns(3)
+        with row2[0]:
+            drange = st.date_input(
+                "Pick up to 30 days",
+                value=st.session_state["dates_range"],
+                help="2-element date range. We'll treat each day as noon→noon."
+            )
+        with row2[1]:
             moon_mode = st.selectbox(
                 "Moon Influence",
                 options=["Ignore Moon", "Subtract Moonlight"],
-                help="Ignore Moon => bigger total. Subtract => only times moon<0 => smaller total."
+                help=("Ignore Moon => don't subtract times moon is up. Subtract => require moon<0 => smaller total.")
             )
+        with row2[2]:
+            step_opts = ["1", "2", "5", "10", "15", "30"]
+            step_str = st.selectbox(
+                "Time Step (Mins)",
+                options=step_opts,
+                index=0,
+                help="Lower => more accurate but slower. E.g. '1' => 1440 steps/day"
+            )
+            step_minutes = int(step_str)
 
-        st.write("#### Select Location on Map")
-        fol_map = folium.Map(location=[lat_in, lon_in], zoom_start=6)
-        folium.Marker([lat_in, lon_in], popup="Current Location").add_to(fol_map)
-        map_out = st_folium(fol_map, width=700, height=450)
+        # SUBMIT button
+        calc_submitted = st.form_submit_button("Calculate")
 
-        # Submit
-        submitted = st.form_submit_button("Submit")
+    # The map is outside the form so user can select location in real-time
+    st.markdown("#### Select Location on Map")
+    fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
+    folium.Marker(
+        [st.session_state["lat"], st.session_state["lon"]],
+        popup="Current Location"
+    ).add_to(fol_map)
+    map_out = st_folium(fol_map, width=700, height=450)
 
-    # A simple progress + console
-    prog_placeholder = st.empty()
-    progress_bar = prog_placeholder.progress(0)
+    if map_out and "last_clicked" in map_out and map_out["last_clicked"]:
+        clat = map_out["last_clicked"]["lat"]
+        clon = map_out["last_clicked"]["lng"]
+        # On each click, update lat/lon in real time
+        if -90 <= clat <= 90 and -180 <= clon <= 180:
+            if st.session_state["last_map_click"] != (clat, clon):
+                st.session_state["lat"] = clat
+                st.session_state["lon"] = clon
+                # Optionally do reverse geocode
+                city_found = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
+                if city_found:
+                    st.session_state["city"] = city_found
+                    st.success(f"Location updated => {city_found} ({clat:.4f}, {clon:.4f})")
+                else:
+                    st.success(f"lat/lon=({clat:.4f}, {clon:.4f}), no city found")
+                st.session_state["last_map_click"] = (clat, clon)
+
+    # Minimal placeholders
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+    console_placeholder = st.empty()
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
-    console_box = st.empty()
 
-    if submitted:
-        # City logic
+    if calc_submitted:
+        # City -> lat/lon if typed
         if city_val != st.session_state["city"]:
             coords = geocode_city(city_val, LOCATIONIQ_TOKEN)
             if coords:
                 lat_in, lon_in = coords
                 st.session_state["city"] = city_val
-                st.success(f"Updated lat/lon for '{city_val}' => {coords}")
+                st.success(f"Updated lat/lon for {city_val} => {coords}")
             else:
                 st.warning("City not found or usage limit reached. Keeping old coords.")
 
+        # Store final lat/lon back
         st.session_state["lat"] = lat_in
         st.session_state["lon"] = lon_in
-        st.session_state["dates_range"] = dates_range
+        st.session_state["dates_range"] = drange
 
-        # Map
-        if map_out and "last_clicked" in map_out and map_out["last_clicked"]:
-            clat = map_out["last_clicked"]["lat"]
-            clon = map_out["last_clicked"]["lng"]
-            if -90 <= clat <= 90 and -180 <= clon <= 180:
-                if st.session_state["last_map_click"] != (clat, clon):
-                    st.session_state["lat"] = clat
-                    st.session_state["lon"] = clon
-                    ccity = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
-                    if ccity:
-                        st.session_state["city"] = ccity
-                        st.success(f"Map click => {ccity} ({clat:.4f}, {clon:.4f})")
-                    else:
-                        st.success(f"Map click => lat/lon=({clat:.4f}, {clon:.4f})")
-                    st.session_state["last_map_click"] = (clat, clon)
-
-        (start_d, end_d) = st.session_state["dates_range"]
+        # Validate date range
+        start_d, end_d = drange[0], drange[-1] if len(drange) > 1 else (drange[0], drange[0])
         if start_d > end_d:
             st.error("Start date must be <= end date.")
             st.stop()
 
-        days_sel = (end_d - start_d).days + 1
-        if days_sel > MAX_DAYS:
-            st.error(f"You picked {days_sel} days. Max {MAX_DAYS} allowed.")
+        day_count = (end_d - start_d).days + 1
+        if day_count > MAX_DAYS:
+            st.error(f"You picked {day_count} days. Max is {MAX_DAYS}.")
             st.stop()
 
-        # Reset console
+        # Clear console
         st.session_state["progress_console"] = ""
-        debug_print("Starting calculations for night-labeled approach...")
+        debug_print("Starting night-labeled astro calculations...")
 
-        # Do it
-        nights = compute_night_details(
+        # Perform calcs
+        nights_list = compute_night_details(
             st.session_state["lat"],
             st.session_state["lon"],
             start_d,
@@ -435,22 +424,21 @@ def main():
         )
         progress_bar.progress(1.0)
 
-        if not nights:
+        if not nights_list:
             st.warning("No data?? Possibly 0-day range or an error.")
             st.stop()
 
         # Summaries
         total_astro_min = 0
-        for row in nights:
-            # e.g. "5 Hours 20 Minutes"
-            parts = row["astro_dark_hours"].split()
-            ah, am = int(parts[0]), int(parts[2])
-            total_astro_min += ah*60 + am
+        for row in nights_list:
+            # "Astro(Hrs)" => "3 Hours 42 Minutes"
+            spl = row["Astro(Hrs)"].split()
+            h_, m_ = int(spl[0]), int(spl[2])
+            total_astro_min += h_*60 + m_
 
         ta_h = total_astro_min // 60
         ta_m = total_astro_min % 60
 
-        # Display results
         st.markdown("#### Results")
         if moon_mode == "Ignore Moon":
             st.markdown(f"""
@@ -462,29 +450,20 @@ def main():
         else:
             st.markdown(f"""
             <div class="result-box">
-                <div class="result-title">Total Astro (Subtracting Moonlight)</div>
+                <div class="result-title">Total Astro (Subtract Moonlight)</div>
                 <div class="result-value">{ta_h}h {ta_m}m</div>
             </div>
             """, unsafe_allow_html=True)
 
+        # Show table with columns: 
+        # Night, A.Start, A.End, M.Rise, M.Set, Astro(Hrs), Phase
+        df = pd.DataFrame(nights_list)
         st.markdown("#### Night-by-Night Breakdown")
-        # We'll show these columns: Night of, A.Start, A.End, M.Rise, M.Set, astro_dark_hours, Phase
-        df = pd.DataFrame(nights)
-        # We'll rename "night_label" to "Night", "astro_dark_hours" => "Astro(Hrs)", "moon_phase" => "Phase"
-        # "A.Start", "A.End", "M.Rise", "M.Set" we keep as is. 
-        df.rename(columns={
-            "night_label": "Night",
-            "astro_dark_hours": "Astro(Hrs)",
-            "moon_phase": "Phase"
-        }, inplace=True)
-        # "moonless_minutes" we won't show in final table (it's just internal).
-        if "moonless_minutes" in df.columns:
-            df.drop(columns=["moonless_minutes"], inplace=True)
-
         st.dataframe(df, use_container_width=True)
 
+    # Show console
     st.markdown("#### Debug / Progress Console")
-    console_box.text_area(
+    console_placeholder.text_area(
         "Progress Console",
         value=st.session_state["progress_console"],
         height=150,
