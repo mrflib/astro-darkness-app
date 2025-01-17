@@ -2,7 +2,7 @@
 # app.py
 ############################
 
-########## CONFIGURATION--BLOCK ##########
+########## CONFIGURATION-BLOCK ##########
 MAX_DAYS = 30
 STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
@@ -545,21 +545,32 @@ def main():
             total_moonless_minutes = total_moonless % 60
 
             st.markdown("#### Results")
-            result_cols = st.columns(2)
-            with result_cols[0]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Total Astro Darkness</div>
-                    <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with result_cols[1]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Moonless Astro Darkness</div>
-                    <div class="result-value">{total_moonless_hours} Hours {total_moonless_minutes} Minutes</div>
-                </div>
-                """, unsafe_allow_html=True)
+            if moon_affect == "Include Moonlight":
+                result_cols = st.columns(2)
+                with result_cols[0]:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Total Astro Darkness</div>
+                        <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with result_cols[1]:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Moonless Astro Darkness</div>
+                        <div class="result-value">{total_moonless_hours} Hours {total_moonless_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                # Center the box by creating three columns and placing the box in the middle
+                empty_col1, main_col, empty_col2 = st.columns([1, 8, 1])
+                with main_col:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Total Astro Darkness</div>
+                        <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             st.markdown("#### Day-by-Day Breakdown")
             df = pd.DataFrame(daily_data)
