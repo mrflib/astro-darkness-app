@@ -308,6 +308,8 @@ def main():
         st.session_state["end_date"] = date.today() + timedelta(days=1)
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
+    if "selected_dates" not in st.session_state:
+        st.session_state["selected_dates"] = [st.session_state["start_date"], st.session_state["end_date"]]
 
     # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
@@ -331,13 +333,17 @@ def main():
             st.write("City search is OFF")
 
     with input_cols[1]:
-        # Date Range Selector
-        dvals = st.date_input(
+        # Date Range Selector with key
+        st.date_input(
             f"Pick up to {MAX_DAYS} days",
-            [st.session_state["start_date"], st.session_state["end_date"]],
+            st.session_state["selected_dates"],
+            key="selected_dates",
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
-        # Updated condition to check for both list and tuple
+
+        # Process the selected dates
+        dvals = st.session_state["selected_dates"]
+
         if isinstance(dvals, (list, tuple)):
             if len(dvals) == 1:
                 st.session_state["start_date"] = dvals[0]
