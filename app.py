@@ -279,6 +279,7 @@ def compute_night_details(
 
     return nights_data
 
+
 ########################################
 # MAIN
 ########################################
@@ -408,7 +409,6 @@ def main():
         calc_btn = st.form_submit_button("Calculate")
 
     if calc_btn:
-        # parse date range
         if len(dval) == 1:
             start_d = dval[0]
             end_d   = dval[0]
