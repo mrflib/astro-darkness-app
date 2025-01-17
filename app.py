@@ -42,6 +42,23 @@ st.markdown("""
     textarea {
         font-family: "Courier New", Courier, monospace;
     }
+    /* Style for result boxes */
+    .result-box {
+        background-color: #28a745; /* Bootstrap green */
+        color: white;
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        margin: 10px;
+    }
+    .result-title {
+        font-size: 1.2em;
+        margin-bottom: 10px;
+    }
+    .result-value {
+        font-size: 1.5em;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -197,7 +214,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 
         # Update progress bar
         progress = (day_count + 1) / MAX_DAYS
-        progress_bar.progress(progress)
+        progress_bar.progress(min(progress, 1.0))
 
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
@@ -235,9 +252,11 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
                     if m_mid < 0.0:
                         moonless_minutes += step_minutes
 
-        astro_hrs = astro_minutes/60.0
-        moonless_hrs = moonless_minutes/60.0
-        debug_print(f"astro_hrs={astro_hrs:.2f}, moonless_hrs={moonless_hrs:.2f}")
+        astro_hrs = astro_minutes//60
+        astro_mins = astro_minutes % 60
+        moonless_hrs = moonless_minutes//60
+        moonless_mins = moonless_minutes % 60
+        debug_print(f"astro_hrs={astro_hrs}, astro_mins={astro_mins}, moonless_hrs={moonless_hrs}, moonless_mins={moonless_mins}")
 
         # crossing-based times
         dark_start_str, dark_end_str = find_dark_crossings(sun_alts, times_list, local_tz)
@@ -267,8 +286,8 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 
         day_results.append({
             "date": current.strftime("%Y-%m-%d"),
-            "astro_dark_hours": round(astro_hrs,2),
-            "moonless_hours": round(moonless_hrs,2),
+            "astro_dark_hours": f"{int(astro_hrs)} Hours {int(astro_mins)} Minutes",
+            "moonless_hours": f"{int(moonless_hrs)} Hours {int(moonless_mins)} Minutes",
             "dark_start": dark_start_str if dark_start_str else "-",
             "dark_end": dark_end_str if dark_end_str else "-",
             "moon_rise": m_rise_str,
@@ -283,7 +302,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         sleep(0.1)
 
     # Final update to progress bar
-    progress_bar.progress(100)
+    progress_bar.progress(1.0)
     debug_print("All calculations completed.")
 
     return day_results
@@ -330,7 +349,7 @@ def main():
 
     with input_cols[1]:
         # Date Range Selector bound to 'selected_dates'
-        dvals = st.date_input(
+        st.date_input(
             f"Pick up to {MAX_DAYS} days",
             value=st.session_state["selected_dates"],
             key="selected_dates",
@@ -397,6 +416,26 @@ def main():
             index=0,
             help="Choose whether to include the moon's effect on astronomical darkness."
         )
+
+    # **Moved the Map Below Coordinates & Moon Influence and Above Calculate Button**
+    st.markdown("#### Select Location on Map")
+    with st.expander("View Map"):
+        folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
+        folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
+        map_click = st_folium(folium_map, width=700, height=500)
+
+        if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
+            lat_clicked, lon_clicked = map_click['last_clicked']['lat'], map_click['last_clicked']['lng']
+            # Update session state
+            st.session_state["lat"] = lat_clicked
+            st.session_state["lon"] = lon_clicked
+            # Perform reverse geocoding to get city
+            city = reverse_geocode(lat_clicked, lon_clicked)
+            if city:
+                st.session_state["city"] = city
+                st.success(f"Location updated to {city} ({lat_clicked:.4f}, {lon_clicked:.4f})")
+            else:
+                st.warning("City not found for the selected location.")
 
     # Calculate Button and Progress Bar (Remain in original position)
     st.markdown("####")
@@ -473,28 +512,43 @@ def main():
             )
 
             # Final update to progress bar
-            progress_bar.progress(100)
+            progress_bar.progress(1.0)
             progress_text.text("Calculations completed.")
 
             if not daily_data:
                 st.warning("No data?? Possibly 0-day range or an error.")
                 st.stop()
 
-            total_astro = sum(d["astro_dark_hours"] for d in daily_data)
-            total_moonless = sum(d["moonless_hours"] for d in daily_data)
+            total_astro = 0
+            total_moonless = 0
+            for d in daily_data:
+                # Extract hours and minutes
+                astro_hours, astro_mins = map(int, d["astro_dark_hours"].split()[0::2])
+                moonless_hours, moonless_mins = map(int, d["moonless_hours"].split()[0::2])
+                total_astro += astro_hours * 60 + astro_mins
+                total_moonless += moonless_hours * 60 + moonless_mins
+
+            total_astro_hours = total_astro // 60
+            total_astro_minutes = total_astro % 60
+            total_moonless_hours = total_moonless // 60
+            total_moonless_minutes = total_moonless % 60
 
             st.markdown("#### Results")
             result_cols = st.columns(2)
             with result_cols[0]:
-                st.markdown(
-                    f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
-                    unsafe_allow_html=True
-                )
+                st.markdown(f"""
+                <div class="result-box">
+                    <div class="result-title">Total Astro Darkness</div>
+                    <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
+                </div>
+                """, unsafe_allow_html=True)
             with result_cols[1]:
-                st.markdown(
-                    f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
-                    unsafe_allow_html=True
-                )
+                st.markdown(f"""
+                <div class="result-box">
+                    <div class="result-title">Moonless Astro Darkness</div>
+                    <div class="result-value">{total_moonless_hours} Hours {total_moonless_minutes} Minutes</div>
+                </div>
+                """, unsafe_allow_html=True)
 
             st.markdown("#### Day-by-Day Breakdown")
             df = pd.DataFrame(daily_data)
@@ -511,25 +565,6 @@ def main():
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
             st.dataframe(df)
-
-    # Reintroduce the Map in an Expander (Always Accessible)
-    with st.expander("View Map"):
-        folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
-        folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
-        map_click = st_folium(folium_map, width=700, height=500)
-
-        if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
-            lat_clicked, lon_clicked = map_click['last_clicked']['lat'], map_click['last_clicked']['lng']
-            # Update session state
-            st.session_state["lat"] = lat_clicked
-            st.session_state["lon"] = lon_clicked
-            # Perform reverse geocoding to get city
-            city = reverse_geocode(lat_clicked, lon_clicked)
-            if city:
-                st.session_state["city"] = city
-                st.success(f"Location updated to {city} ({lat_clicked:.4f}, {lon_clicked:.4f})")
-            else:
-                st.warning("City not found for the selected location.")
 
 # Run the app
 if __name__=="__main__":
