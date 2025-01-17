@@ -302,10 +302,6 @@ def main():
         st.session_state["lat"] = 31.6258
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
-    if "start_date" not in st.session_state:
-        st.session_state["start_date"] = date.today()
-    if "end_date" not in st.session_state:
-        st.session_state["end_date"] = date.today() + timedelta(days=1)
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "selected_dates" not in st.session_state:
@@ -425,7 +421,11 @@ def main():
     )
 
     # Check day range (after date selection)
-    delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
+    if len(st.session_state["selected_dates"]) >= 2:
+        start_d, end_d = st.session_state["selected_dates"][:2]
+    else:
+        start_d = end_d = st.session_state["selected_dates"][0]
+    delta_days = (end_d - start_d).days + 1
     if delta_days > MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         st.stop()
@@ -463,10 +463,6 @@ def main():
             st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
             end_date = adjusted_end
 
-        # Set 'start_date' and 'end_date'
-        st.session_state["start_date"] = start_date
-        st.session_state["end_date"] = end_date
-
         # Proceed only if date range is valid
         if (start_date <= end_date) and (delta_days <= MAX_DAYS):
             # Reset console
@@ -483,8 +479,8 @@ def main():
             daily_data = compute_day_details(
                 st.session_state["lat"],
                 st.session_state["lon"],
-                st.session_state["start_date"],
-                st.session_state["end_date"],
+                start_date,
+                end_date,
                 moon_affect,
                 step_min,
                 progress_bar
@@ -529,6 +525,12 @@ def main():
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
             st.dataframe(df)
+
+            # Reintroduce the Map in an Expander
+            with st.expander("View Map"):
+                folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
+                folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
+                st_folium(folium_map, width=700, height=500)
 
 # Run the app
 if __name__=="__main__":
