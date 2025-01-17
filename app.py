@@ -305,7 +305,7 @@ def main():
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "selected_dates" not in st.session_state:
-        st.session_state["selected_dates"] = [st.session_state["start_date"], st.session_state["end_date"]]
+        st.session_state["selected_dates"] = [date.today(), date.today() + timedelta(days=1)]
 
     # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
@@ -336,6 +336,15 @@ def main():
             key="selected_dates",
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
+
+        # Update 'selected_dates' in session state based on user selection
+        if isinstance(dvals, list) or isinstance(dvals, tuple):
+            if len(dvals) == 1:
+                st.session_state["selected_dates"] = [dvals[0], dvals[0]]
+            elif len(dvals) >=2:
+                st.session_state["selected_dates"] = [dvals[0], dvals[-1]]
+        elif isinstance(dvals, date):
+            st.session_state["selected_dates"] = [dvals, dvals]
 
     with input_cols[2]:
         # Allowed Deviation Minutes Selector
