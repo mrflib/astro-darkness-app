@@ -248,7 +248,7 @@ def main():
 
     st.write(f"**Running Streamlit version:** {st.__version__}")
 
-    # Session defaults
+    # Initialize session
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "city" not in st.session_state:
@@ -258,6 +258,7 @@ def main():
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
     if "dates_range" not in st.session_state:
+        # By default, pick today + tomorrow
         st.session_state["dates_range"] = (date.today(), date.today() + timedelta(days=1))
     if "last_map_click" not in st.session_state:
         st.session_state["last_map_click"] = None
@@ -285,14 +286,16 @@ def main():
                 st.warning("City not found or usage limit reached. Keeping previous coords.")
 
     with row1[1]:
-        # Two-date input => single pop-up
-        st.session_state["dates_range"] = st.date_input(
+        # We do NOT store back into st.session_state here.
+        # We just read from it as the default, and let Streamlit manage the final value.
+        dates_range = st.date_input(
             "Pick up to 30 days (Night-labeled)",
             value=st.session_state["dates_range"],
             help=("Select two dates in a single pop-up. We'll treat each local day as noon→noon, "
                   "so all nighttime belongs to the day it started. Up to 30 days allowed."),
             key="dates_range"
         )
+        # Now "dates_range" is an alias, but the final actual value is also in st.session_state["dates_range"].
 
     with row1[2]:
         step_choices = ["1", "2", "5", "10", "15", "30"]
@@ -373,8 +376,9 @@ def main():
     console_holder = st.empty()
 
     if calc_button:
-        # day-limit check
+        # read date range from st.session_state
         start_d, end_d = st.session_state["dates_range"]
+
         if start_d > end_d:
             st.error("Start date must be <= end date.")
             st.stop()
