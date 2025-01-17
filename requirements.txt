@@ -1,9 +1,8 @@
-streamlit
-requests
-pandas
-skyfield
-geopy
-timezonefinder
+streamlit==1.24.1
+pandas>=1.4.0
 pytz
+timezonefinder
+requests
 folium
 streamlit-folium
+skyfield
