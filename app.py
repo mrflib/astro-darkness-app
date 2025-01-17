@@ -129,6 +129,7 @@ def reverse_geocode(lat, lon, token):
         debug_print(f"Reverse error: {e}")
     return None
 
+
 ########################################
 # NIGHT-LABELED NOON→NOON CALC
 ########################################
@@ -143,7 +144,13 @@ def compute_night_details(
     """
     For each local day in [start_date, end_date], define day D as local noon D -> local noon D+1.
     Label that entire block "Night of D". 
-    Then sum minutes where sun < -18°, optionally also checking moon altitude < 0 if ignoring moonlight.
+
+    ***IMPORTANT:***
+    - "Include Moonlight" => we do *not* subtract times with the Moon above horizon.
+      So astro_minutes counts all minutes sun<-18, and moonless_minutes is the *subset* with moon<0.
+      The total 'Astro Darkness' is bigger because we do not exclude moonlit times.
+    - "Ignore Moonlight" => we *only* count minutes when the Moon is *also* below horizon 
+      => results in a smaller total for astro darkness.
     """
     debug_print("Starting Night-labeled calculations...")
     ts = load.timescale()
@@ -193,28 +200,48 @@ def compute_night_details(
             dt_utc = start_utc + timedelta(minutes=s*step_minutes)
             times_list.append(ts.from_datetime(dt_utc))
 
+        # We'll accumulate minutes in 2 ways:
+        # 1) astro_minutes => minutes sun < -18
+        # 2) moonless_minutes => minutes sun < -18 AND moon < 0 (only relevant if user picks "Ignore Moonlight"?)
+        # But we'll compute both anyway and interpret them accordingly.
         astro_minutes = 0
         moonless_minutes = 0
 
         for idx in range(len(times_list)-1):
             t_ = times_list[idx]
             sun_alt_deg = observer.at(t_).observe(eph['Sun']).apparent().altaz()[0].degrees
-            if moon_affect == "Ignore Moonlight":
-                moon_alt_deg = observer.at(t_).observe(eph['Moon']).apparent().altaz()[0].degrees
-            else:
-                moon_alt_deg = -9999.0  # dummy
+            moon_alt_deg = observer.at(t_).observe(eph['Moon']).apparent().altaz()[0].degrees
 
             if sun_alt_deg < -18.0:
                 astro_minutes += step_minutes
-                if moon_affect == "Ignore Moonlight":
-                    if moon_alt_deg < 0.0:
-                        moonless_minutes += step_minutes
 
-        # convert to h/m
-        a_h = astro_minutes // 60
-        a_m = astro_minutes % 60
-        m_h = moonless_minutes // 60
-        m_m = moonless_minutes % 60
+                # Also count if the moon is below horizon
+                if moon_alt_deg < 0.0:
+                    moonless_minutes += step_minutes
+
+        # Now interpret them depending on user choice:
+        # "Include Moonlight" => show astro_minutes as the big total, 
+        #   the user sees that as "Astro Darkness." 
+        #   We won't subtract times the moon is up. 
+        # "Ignore Moonlight" => the "true" astro darkness is the subset with moon below horizon => moonless_minutes.
+
+        if moon_affect == "Include Moonlight":
+            # The "big" total is astro_minutes. We'll store that as "astro_dark_hours"
+            # The smaller subset is moonless_minutes, but we won't actually use that as the final total 
+            # (the user won't see a second column).
+            final_astro = astro_minutes
+        else:
+            # "Ignore Moonlight" => we only want the smaller subset
+            final_astro = moonless_minutes
+
+        a_h = final_astro // 60
+        a_m = final_astro % 60
+
+        # We'll store a second field "moonless_hours" for reference 
+        # so we can show or hide in the final display. 
+        # If ignoring moonlight, astro==moonless. If including, astro is bigger, moonless is smaller.
+        mo_h = moonless_minutes // 60
+        mo_m = moonless_minutes % 60
 
         # Moon phase at local noon
         local_noon_utc = local_noon_aware.astimezone(pytz.utc)
@@ -227,7 +254,7 @@ def compute_night_details(
         night_data.append({
             "night_label": label_date.strftime("%Y-%m-%d"),
             "astro_dark_hours": f"{a_h} Hours {a_m} Minutes",
-            "moonless_hours":   f"{m_h} Hours {m_m} Minutes",
+            "moonless_hours":   f"{mo_h} Hours {mo_m} Minutes",
             "moon_phase": moon_phase_icon(phase_angle)
         })
 
@@ -286,8 +313,7 @@ def main():
                 st.warning("City not found or usage limit reached. Keeping previous coords.")
 
     with row1[1]:
-        # We do NOT store back into st.session_state here.
-        # We just read from it as the default, and let Streamlit manage the final value.
+        # Let date_input store final result in st.session_state itself
         dates_range = st.date_input(
             "Pick up to 30 days (Night-labeled)",
             value=st.session_state["dates_range"],
@@ -295,7 +321,6 @@ def main():
                   "so all nighttime belongs to the day it started. Up to 30 days allowed."),
             key="dates_range"
         )
-        # Now "dates_range" is an alias, but the final actual value is also in st.session_state["dates_range"].
 
     with row1[2]:
         step_choices = ["1", "2", "5", "10", "15", "30"]
@@ -334,11 +359,13 @@ def main():
             st.session_state["lon"] = lon_in
 
     with row2[2]:
+        # Default is "Include Moonlight" => bigger total
         moon_mode = st.selectbox(
             "Moon Influence",
             options=["Include Moonlight", "Ignore Moonlight"],
-            help=("If 'Ignore Moonlight', we subtract times the Moon is above horizon. "
-                  "If 'Include', we don't subtract those minutes.")
+            index=0,
+            help=("Include Moonlight => we do NOT subtract times the moon is up (bigger total). "
+                  "Ignore Moonlight => we ONLY count times the moon is below horizon (smaller total).")
         )
 
     # Map
@@ -361,115 +388,4 @@ def main():
                     ccity = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
                     if ccity:
                         st.session_state["city"] = ccity
-                        st.success(f"Map click -> {ccity} ({clat:.4f}, {clon:.4f})")
-                    else:
-                        st.success(f"Map click -> lat/lon=({clat:.4f}, {clon:.4f})")
-                    st.session_state["last_map_click"] = (clat, clon)
-
-    # Calculate
-    st.markdown("####")
-    calc_button = st.button("Calculate")
-
-    # Placeholders
-    progress_holder = st.empty()
-    progress_bar = progress_holder.progress(0)
-    console_holder = st.empty()
-
-    if calc_button:
-        # read date range from st.session_state
-        start_d, end_d = st.session_state["dates_range"]
-
-        if start_d > end_d:
-            st.error("Start date must be <= end date.")
-            st.stop()
-
-        day_count = (end_d - start_d).days + 1
-        if day_count > MAX_DAYS:
-            st.error(f"You picked {day_count} days. Max allowed is {MAX_DAYS}.")
-            st.stop()
-
-        # Reset console
-        st.session_state["progress_console"] = ""
-        debug_print("Starting night-labeled astro calculations...")
-
-        nights = compute_night_details(
-            st.session_state["lat"],
-            st.session_state["lon"],
-            start_d,
-            end_d,
-            moon_mode,
-            step_minutes,
-            progress_bar,
-            LOCATIONIQ_TOKEN
-        )
-
-        progress_bar.progress(1.0)
-        if not nights:
-            st.warning("No data?? Possibly 0-day range or an error.")
-            st.stop()
-
-        # Summaries
-        total_astro_min = 0
-        total_moonless_min = 0
-        for row in nights:
-            # e.g. "5 Hours 28 Minutes"
-            a_parts = row["astro_dark_hours"].split()
-            a_h, a_m = int(a_parts[0]), int(a_parts[2])
-            m_parts = row["moonless_hours"].split()
-            m_h, m_m = int(m_parts[0]), int(m_parts[2])
-
-            total_astro_min += a_h*60 + a_m
-            total_moonless_min += m_h*60 + m_m
-
-        ta_h = total_astro_min // 60
-        ta_m = total_astro_min % 60
-        tm_h = total_moonless_min // 60
-        tm_m = total_moonless_min % 60
-
-        st.markdown("#### Results")
-        if moon_mode == "Ignore Moonlight":
-            rc = st.columns(2)
-            with rc[0]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Total Astro Darkness</div>
-                    <div class="result-value">{ta_h}h {ta_m}m</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with rc[1]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Moonless Darkness</div>
-                    <div class="result-value">{tm_h}h {tm_m}m</div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            # If including moonlight, show only total astro
-            st.markdown(f"""
-            <div class="result-box">
-                <div class="result-title">Total Astro Darkness</div>
-                <div class="result-value">{ta_h}h {ta_m}m</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("#### Night-by-Night Breakdown")
-        df = pd.DataFrame(nights)
-        df.rename(columns={
-            "night_label": "Night of",
-            "astro_dark_hours": "Astro (hrs)",
-            "moonless_hours": "Moonless (hrs)",
-            "moon_phase": "Phase"
-        }, inplace=True)
-        st.dataframe(df, use_container_width=True)
-
-    st.markdown("#### Debug / Progress Console")
-    console_holder.text_area(
-        "Progress Console",
-        value=st.session_state["progress_console"],
-        height=150,
-        disabled=True,
-        label_visibility="collapsed"
-    )
-
-if __name__ == "__main__":
-    main()
+                        st.success(f"Map click -> {ccit
