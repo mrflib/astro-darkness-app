@@ -325,6 +325,8 @@ def main():
         st.session_state["progress_console"] = ""
     if "selected_dates" not in st.session_state:
         st.session_state["selected_dates"] = [date.today(), date.today() + timedelta(days=1)]
+    if "last_click" not in st.session_state:
+        st.session_state["last_click"] = None  # To track last processed click
 
     # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
@@ -425,17 +427,18 @@ def main():
         map_click = st_folium(folium_map, width=700, height=500)
 
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
-            lat_clicked, lon_clicked = map_click['last_clicked']['lat'], map_click['last_clicked']['lng']
-            # Update session state
-            st.session_state["lat"] = lat_clicked
-            st.session_state["lon"] = lon_clicked
-            # Perform reverse geocoding to get city
-            city = reverse_geocode(lat_clicked, lon_clicked)
-            if city:
-                st.session_state["city"] = city
-                st.success(f"Location updated to {city} ({lat_clicked:.4f}, {lon_clicked:.4f})")
-            else:
-                st.warning("City not found for the selected location.")
+            current_click = (map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
+            if st.session_state["last_click"] != current_click:
+                st.session_state["lat"], st.session_state["lon"] = current_click
+                # Perform reverse geocoding to get city
+                city = reverse_geocode(map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
+                if city:
+                    st.session_state["city"] = city
+                    st.success(f"Location updated to {city} ({map_click['last_clicked']['lat']:.4f}, {map_click['last_clicked']['lng']:.4f})")
+                else:
+                    st.warning("City not found for the selected location.")
+                # Update last_click to prevent duplicate processing
+                st.session_state["last_click"] = current_click
 
     # Calculate Button and Progress Bar (Remain in original position)
     st.markdown("####")
@@ -523,10 +526,14 @@ def main():
             total_moonless = 0
             for d in daily_data:
                 # Extract hours and minutes
-                astro_hours, astro_mins = map(int, d["astro_dark_hours"].split()[0::2])
-                moonless_hours, moonless_mins = map(int, d["moonless_hours"].split()[0::2])
-                total_astro += astro_hours * 60 + astro_mins
-                total_moonless += moonless_hours * 60 + moonless_mins
+                astro_parts = d["astro_dark_hours"].split()
+                astro_hours = int(astro_parts[0])
+                astro_minutes = int(astro_parts[2])
+                moonless_parts = d["moonless_hours"].split()
+                moonless_hours = int(moonless_parts[0])
+                moonless_minutes = int(moonless_parts[2])
+                total_astro += astro_hours * 60 + astro_minutes
+                total_moonless += moonless_hours * 60 + moonless_minutes
 
             total_astro_hours = total_astro // 60
             total_astro_minutes = total_astro % 60
@@ -564,7 +571,7 @@ def main():
             })
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
-            st.dataframe(df)
+            st.dataframe(df.style.hide_index())
 
 # Run the app
 if __name__=="__main__":
