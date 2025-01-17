@@ -28,17 +28,26 @@ st.set_page_config(
 )
 
 # Additional custom CSS:
-# 1) Dark-green (#218838) for the "Calculate" button and progress bar
-# 2) Remove the default form background/border/padding
-# 3) Slightly smaller border-radius for result boxes
+# 1) Dark-green (#218838) for the "Calculate" button and progress bar (normal + hover + active).
+# 2) Remove default form styling.
+# 3) Slightly smaller radius for result boxes.
 st.markdown(r"""
 <style>
-/* Make the "Calculate" button #218838 */
+
+/* The "Calculate" button normal, hover, active states => #218838 */
 .stButton > button {
     background-color: #218838 !important;
     border-color: #1e7e34 !important;
     color: white !important;
 }
+.stButton > button:hover:not(:disabled),
+.stButton > button:focus:not(:disabled),
+.stButton > button:active:not(:disabled) {
+    background-color: #218838 !important;
+    color: white !important;
+    border-color: #1e7e34 !important;
+}
+
 /* Progress bar override to the same #218838 */
 div[role='progressbar'] div {
     background-color: #218838 !important;
@@ -75,7 +84,6 @@ div[data-testid="stForm"] {
 ########################################
 # UTILS
 ########################################
-
 def debug_print(msg: str):
     """Append debug info to session-based console if DEBUG=True."""
     if DEBUG:
@@ -140,7 +148,6 @@ def reverse_geocode(lat, lon, token):
         debug_print(f"Reverse error: {e}")
     return None
 
-
 ########################################
 # NIGHT-LABELED NOON->NOON CALC
 ########################################
@@ -154,7 +161,7 @@ def compute_night_details(
     For each local day from local noon->noon, label it "Night of D".
     We count:
       - astro_minutes if sun_alt < -threshold
-      - moonless_minutes if moon_alt < 0 as well
+      - moonless_minutes if also moon_alt < 0
     Then find crossing times for:
       - Dark Start, Dark End (sun crossing -threshold)
       - Moon Rise, Moon Set (moon crossing 0)
@@ -346,6 +353,7 @@ def main():
 
     # Map
     st.markdown("#### Location on Map")
+    st.write("You may need to click the map a few times to make it work! Free API fun! :)")
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
     folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Current").add_to(fol_map)
     map_res = st_folium(fol_map, width=700, height=450)
@@ -363,8 +371,6 @@ def main():
                 else:
                     st.success(f"Map => lat/lon=({clat:.4f}, {clon:.4f})")
                 st.session_state["last_map_click"] = (clat, clon)
-
-    st.write("You may need to click the map a few times to make it work! Free API fun! :)")
 
     # Next row (form) for date range, threshold, time step
     st.markdown("### Calculate Darkness")
