@@ -27,13 +27,9 @@ st.set_page_config(
     layout="centered"
 )
 
-# Additional custom CSS:
-# 1) Dark-green (#218838) for the "Calculate" button and progress bar (normal + hover + active).
-# 2) Remove default form styling.
-# 3) Slightly smaller radius for result boxes.
+# Additional custom CSS for button hover/active in #218838, progress bar same color, form styling, etc.
 st.markdown(r"""
 <style>
-
 /* The "Calculate" button normal, hover, active states => #218838 */
 .stButton > button {
     background-color: #218838 !important;
@@ -155,20 +151,21 @@ def compute_night_details(
     lat, lon,
     start_date, end_date,
     twilight_threshold,  # e.g. 6 for civil, 12 for nautical, 18 for astro
-    step_minutes
+    step_minutes,
+    pbar                # <--- pass in the progress bar so we can update it each day
 ):
     """
     For each local day from local noon->noon, label it "Night of D".
     We count:
-      - astro_minutes if sun_alt < -threshold
+      - astro_minutes if sun_alt < -twilight_threshold
       - moonless_minutes if also moon_alt < 0
     Then find crossing times for:
-      - Dark Start, Dark End (sun crossing -threshold)
+      - Dark Start, Dark End (sun crossing -twilight_threshold)
       - Moon Rise, Moon Set (moon crossing 0)
-    Return: 
-      Night, Dark Start, Dark End, Moon Rise, Moon Set, 
-      Dark Hours, Moonless Hours, Phase
-    Where 'Dark Hours' is "6hrs 32min" format.
+    Return a list of dicts with columns:
+      [Night, Dark Start, Dark End, Moon Rise, Moon Set, 
+       Dark Hours, Moonless Hours, Phase]
+    We'll also update 'pbar' once per day to show partial progress.
     """
     from skyfield.api import load, Topos
     ts = load.timescale()
@@ -190,6 +187,10 @@ def compute_night_details(
     total_days = (end_date - start_date).days + 1
 
     for i in range(total_days):
+        # Update the progress bar fraction
+        fraction = (i + 1) / total_days
+        pbar.progress(fraction)
+
         day_label = start_date + timedelta(days=i)
         debug_print(f"Processing 'Night of {day_label}' (noon->noon).")
 
@@ -265,7 +266,6 @@ def compute_night_details(
         moonl_str = f"{m_hrs}hrs {m_min}min"
 
         # moon phase at local noon
-        from skyfield.api import load
         t_noon = ts.from_datetime(local_noon_aware.astimezone(pytz.utc))
         obs_noon = observer.at(t_noon)
         sun_ecl  = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
@@ -285,7 +285,6 @@ def compute_night_details(
         })
 
     return nights_data
-
 
 ########################################
 # MAIN
@@ -437,15 +436,16 @@ def main():
         pbar_holder = st.empty()
         pbar = pbar_holder.progress(0)
 
+        # Pass the progress bar to the function
         nights_data = compute_night_details(
             st.session_state["lat"],
             st.session_state["lon"],
             start_d,
             end_d,
             twilight_threshold,
-            step_minutes
+            step_minutes,
+            pbar  # <--- pass pbar here
         )
-        pbar.progress(1.0)
 
         if not nights_data:
             st.warning("No data?? Possibly 0-day range or error.")
