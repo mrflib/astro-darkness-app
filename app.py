@@ -129,14 +129,13 @@ def reverse_geocode(lat, lon, token):
         debug_print(f"Reverse error: {e}")
     return None
 
-
 ########################################
 # NIGHT-LABELED NOON→NOON CALC
 ########################################
 def compute_night_details(
     lat, lon,
     start_date, end_date,
-    moon_affect,  # "Include Moonlight" or "Ignore Moonlight"
+    moon_affect,  # "Ignore Moon", "Subtract Moonlight"
     step_minutes,
     progress_bar,
     token
@@ -144,13 +143,8 @@ def compute_night_details(
     """
     For each local day in [start_date, end_date], define day D as local noon D -> local noon D+1.
     Label that entire block "Night of D". 
-
-    ***IMPORTANT:***
-    - "Include Moonlight" => we do *not* subtract times with the Moon above horizon.
-      So astro_minutes counts all minutes sun<-18, and moonless_minutes is the *subset* with moon<0.
-      The total 'Astro Darkness' is bigger because we do not exclude moonlit times.
-    - "Ignore Moonlight" => we *only* count minutes when the Moon is *also* below horizon 
-      => results in a smaller total for astro darkness.
+    - If moon_affect=="Ignore Moon", we do not subtract times the Moon is up => bigger total of astro darkness.
+    - If moon_affect=="Subtract Moonlight", we only count minutes that Sun<-18 and Moon<0 => smaller total.
     """
     debug_print("Starting Night-labeled calculations...")
     ts = load.timescale()
@@ -200,46 +194,32 @@ def compute_night_details(
             dt_utc = start_utc + timedelta(minutes=s*step_minutes)
             times_list.append(ts.from_datetime(dt_utc))
 
-        # We'll accumulate minutes in 2 ways:
-        # 1) astro_minutes => minutes sun < -18
-        # 2) moonless_minutes => minutes sun < -18 AND moon < 0 (only relevant if user picks "Ignore Moonlight"?)
-        # But we'll compute both anyway and interpret them accordingly.
+        # We'll accumulate minutes:
+        # astro_minutes = sun < -18
+        # moonless_minutes = sun < -18 AND moon < 0
         astro_minutes = 0
         moonless_minutes = 0
 
         for idx in range(len(times_list)-1):
             t_ = times_list[idx]
-            sun_alt_deg = observer.at(t_).observe(eph['Sun']).apparent().altaz()[0].degrees
-            moon_alt_deg = observer.at(t_).observe(eph['Moon']).apparent().altaz()[0].degrees
+            sun_alt = observer.at(t_).observe(eph['Sun']).apparent().altaz()[0].degrees
+            moon_alt = observer.at(t_).observe(eph['Moon']).apparent().altaz()[0].degrees
 
-            if sun_alt_deg < -18.0:
+            if sun_alt < -18.0:
                 astro_minutes += step_minutes
-
-                # Also count if the moon is below horizon
-                if moon_alt_deg < 0.0:
+                if moon_alt < 0.0:
                     moonless_minutes += step_minutes
 
-        # Now interpret them depending on user choice:
-        # "Include Moonlight" => show astro_minutes as the big total, 
-        #   the user sees that as "Astro Darkness." 
-        #   We won't subtract times the moon is up. 
-        # "Ignore Moonlight" => the "true" astro darkness is the subset with moon below horizon => moonless_minutes.
-
-        if moon_affect == "Include Moonlight":
-            # The "big" total is astro_minutes. We'll store that as "astro_dark_hours"
-            # The smaller subset is moonless_minutes, but we won't actually use that as the final total 
-            # (the user won't see a second column).
+        if moon_affect == "Ignore Moon":
+            # bigger total is just astro_minutes
             final_astro = astro_minutes
         else:
-            # "Ignore Moonlight" => we only want the smaller subset
+            # "Subtract Moonlight" => only the subset with moon below horizon
             final_astro = moonless_minutes
 
         a_h = final_astro // 60
         a_m = final_astro % 60
 
-        # We'll store a second field "moonless_hours" for reference 
-        # so we can show or hide in the final display. 
-        # If ignoring moonlight, astro==moonless. If including, astro is bigger, moonless is smaller.
         mo_h = moonless_minutes // 60
         mo_m = moonless_minutes % 60
 
@@ -273,8 +253,6 @@ def main():
     </h4>
     """, unsafe_allow_html=True)
 
-    st.write(f"**Running Streamlit version:** {st.__version__}")
-
     # Initialize session
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
@@ -285,107 +263,222 @@ def main():
     if "lon" not in st.session_state:
         st.session_state["lon"] = -7.9892
     if "dates_range" not in st.session_state:
-        # By default, pick today + tomorrow
         st.session_state["dates_range"] = (date.today(), date.today() + timedelta(days=1))
     if "last_map_click" not in st.session_state:
         st.session_state["last_map_click"] = None
 
-    # Retrieve token
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
-    # Row 1: city, date range, time step
-    st.markdown("#### Inputs")
-    row1 = st.columns(3)
+    # By wrapping everything in a form, we avoid partial re-runs each time 
+    # a user picks a date or types in city. Instead, changes only commit 
+    # when they press "Submit".
+    with st.form("main_form"):
+        st.write("**Inputs**")
 
-    with row1[0]:
-        city_val = st.text_input(
-            "City (optional)",
-            value=st.session_state["city"],
-            help="Enter a city name (e.g., 'London'). We attempt lat/lon if recognized."
-        )
+        # Row 1: city, date range, time step
+        row1 = st.columns(3)
+        with row1[0]:
+            city_val = st.text_input(
+                "City (optional)",
+                value=st.session_state["city"],
+                help="Enter a city name (e.g., 'London'). We'll update lat/lon if recognized."
+            )
+
+        with row1[1]:
+            # 2-element date input => single pop-up
+            dates_range = st.date_input(
+                "Pick up to 30 days (Night-labeled)",
+                value=st.session_state["dates_range"],
+                help=("Select two dates in a single pop-up. We'll treat each local day as noon→noon, "
+                      "so all nighttime belongs to the day it started. Up to 30 days allowed."),
+            )
+
+        with row1[2]:
+            step_choices = ["1", "2", "5", "10", "15", "30"]
+            step_mins_str = st.selectbox(
+                "Time Step (Mins)",
+                options=step_choices,
+                index=0,
+                help="Lower = more accurate but slower. E.g., '1' => 1440 steps/day; '30' => 48 steps/day."
+            )
+            step_minutes = int(step_mins_str)
+
+        # Row 2: lat, lon, moon influence
+        row2 = st.columns(3)
+        with row2[0]:
+            lat_in = st.number_input(
+                "Latitude",
+                value=st.session_state["lat"],
+                format="%.6f",
+                min_value=-90.0,
+                max_value=90.0,
+                help="Decimal degrees latitude (e.g., 51.5074)."
+            )
+        with row2[1]:
+            lon_in = st.number_input(
+                "Longitude",
+                value=st.session_state["lon"],
+                format="%.6f",
+                min_value=-180.0,
+                max_value=180.0,
+                help="Decimal degrees longitude (e.g., -0.1278)."
+            )
+
+        with row2[2]:
+            moon_mode = st.selectbox(
+                "Moon Influence",
+                options=["Ignore Moon", "Subtract Moonlight"],
+                help=("Ignore Moon => do not subtract times the moon is up (larger total). "
+                      "Subtract Moonlight => only times sun<-18 and moon<0 (smaller total).")
+            )
+
+        st.write("#### Select Location on Map")
+        # We'll keep a map, but note that each click will cause a re-run if we do it outside the form.
+        # We'll do it inside the form, but it means we won't see immediate lat/lon changes 
+        # until user hits 'Submit'. This is a trade-off.
+        folium_map = folium.Map(location=[lat_in, lon_in], zoom_start=6)
+        folium.Marker(
+            [lat_in, lon_in],
+            popup="Current Location"
+        ).add_to(folium_map)
+        map_res = st_folium(folium_map, width=700, height=450)
+
+        # Submit button
+        submitted = st.form_submit_button("Submit")
+
+    # Minimal placeholders
+    progress_holder = st.empty()
+    progress_bar = progress_holder.progress(0)
+    if "progress_console" not in st.session_state:
+        st.session_state["progress_console"] = ""
+    console_holder = st.empty()
+
+    # If user pressed "Submit," apply their changes to session state,
+    # then do the calculations if desired.
+    if submitted:
+        # City logic
         if city_val != st.session_state["city"]:
             coords = geocode_city(city_val, LOCATIONIQ_TOKEN)
             if coords:
-                st.session_state["lat"], st.session_state["lon"] = coords
+                lat_in, lon_in = coords  # override
                 st.session_state["city"] = city_val
                 st.success(f"Updated lat/lon for '{city_val}' => {coords}")
             else:
                 st.warning("City not found or usage limit reached. Keeping previous coords.")
 
-    with row1[1]:
-        # Let date_input store final result in st.session_state itself
-        dates_range = st.date_input(
-            "Pick up to 30 days (Night-labeled)",
-            value=st.session_state["dates_range"],
-            help=("Select two dates in a single pop-up. We'll treat each local day as noon→noon, "
-                  "so all nighttime belongs to the day it started. Up to 30 days allowed."),
-            key="dates_range"
-        )
+        st.session_state["lat"] = lat_in
+        st.session_state["lon"] = lon_in
+        st.session_state["dates_range"] = dates_range
 
-    with row1[2]:
-        step_choices = ["1", "2", "5", "10", "15", "30"]
-        step_mins_str = st.selectbox(
-            "Time Step (Mins)",
-            options=step_choices,
-            index=0,
-            help="Lower = more accurate but slower. E.g., '1' => 1440 steps/day; '30' => 48 steps/day."
-        )
-        step_minutes = int(step_mins_str)
-
-    # Row 2: lat, lon, moon influence
-    row2 = st.columns(3)
-    with row2[0]:
-        lat_in = st.number_input(
-            "Latitude",
-            value=st.session_state["lat"],
-            format="%.6f",
-            min_value=-90.0,
-            max_value=90.0,
-            help="Decimal degrees latitude (e.g., 51.5074 for London)."
-        )
-        if abs(lat_in - st.session_state["lat"]) > 1e-7:
-            st.session_state["lat"] = lat_in
-
-    with row2[1]:
-        lon_in = st.number_input(
-            "Longitude",
-            value=st.session_state["lon"],
-            format="%.6f",
-            min_value=-180.0,
-            max_value=180.0,
-            help="Decimal degrees longitude (e.g., -0.1278 for London)."
-        )
-        if abs(lon_in - st.session_state["lon"]) > 1e-7:
-            st.session_state["lon"] = lon_in
-
-    with row2[2]:
-        # Default is "Include Moonlight" => bigger total
-        moon_mode = st.selectbox(
-            "Moon Influence",
-            options=["Include Moonlight", "Ignore Moonlight"],
-            index=0,
-            help=("Include Moonlight => we do NOT subtract times the moon is up (bigger total). "
-                  "Ignore Moonlight => we ONLY count times the moon is below horizon (smaller total).")
-        )
-
-    # Map
-    st.markdown("#### Select Location on Map")
-    with st.expander("View / Click Map"):
-        folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
-        folium.Marker(
-            [st.session_state["lat"], st.session_state["lon"]],
-            popup="Current Location"
-        ).add_to(folium_map)
-        map_res = st_folium(folium_map, width=700, height=450)
-
+        # Map click updates
         if map_res and "last_clicked" in map_res and map_res["last_clicked"]:
             clat = map_res["last_clicked"]["lat"]
             clon = map_res["last_clicked"]["lng"]
             if -90 <= clat <= 90 and -180 <= clon <= 180:
+                # If truly new click
                 if st.session_state["last_map_click"] != (clat, clon):
                     st.session_state["lat"] = clat
                     st.session_state["lon"] = clon
                     ccity = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
                     if ccity:
                         st.session_state["city"] = ccity
-                        st.success(f"Map click -> {ccit
+                        st.success(f"Map click => {ccity} ({clat:.4f}, {clon:.4f})")
+                    else:
+                        st.success(f"Map click => lat/lon=({clat:.4f}, {clon:.4f})")
+                    st.session_state["last_map_click"] = (clat, clon)
+
+        # Day-limit check
+        (start_d, end_d) = st.session_state["dates_range"]
+        if start_d > end_d:
+            st.error("Start date must be <= end date.")
+            st.stop()
+
+        day_count = (end_d - start_d).days + 1
+        if day_count > MAX_DAYS:
+            st.error(f"You picked {day_count} days. Max allowed is {MAX_DAYS}.")
+            st.stop()
+
+        # Reset console
+        st.session_state["progress_console"] = ""
+        debug_print("Starting night-labeled astro calculations...")
+
+        # Perform calculations
+        nights = compute_night_details(
+            st.session_state["lat"],
+            st.session_state["lon"],
+            start_d,
+            end_d,
+            moon_mode,
+            step_minutes,
+            progress_bar,
+            LOCATIONIQ_TOKEN
+        )
+        progress_bar.progress(1.0)
+
+        if not nights:
+            st.warning("No data?? Possibly 0-day range or an error.")
+            st.stop()
+
+        # Summaries
+        total_astro_min = 0
+        total_moonless_min = 0
+        for row in nights:
+            # e.g. "5 Hours 28 Minutes"
+            a_parts = row["astro_dark_hours"].split()
+            a_h, a_m = int(a_parts[0]), int(a_parts[2])
+            total_astro_min += a_h*60 + a_m
+
+            m_parts = row["moonless_hours"].split()
+            m_h, m_m = int(m_parts[0]), int(m_parts[2])
+            total_moonless_min += (m_h*60 + m_m)
+
+        ta_h = total_astro_min // 60
+        ta_m = total_astro_min % 60
+
+        tm_h = total_moonless_min // 60
+        tm_m = total_moonless_min % 60
+
+        st.markdown("#### Results")
+        if moon_mode == "Ignore Moon":
+            # astro_dark_hours is bigger total
+            st.markdown(f"""
+            <div class="result-box">
+                <div class="result-title">Astro Darkness (Ignoring Moon)</div>
+                <div class="result-value">{ta_h}h {ta_m}m</div>
+            </div>
+            """, unsafe_allow_html=True)
+            # Optionally also show the smaller 'moonless' subset:
+            st.markdown(f"*(Moonless subset was {tm_h}h {tm_m}m)*")
+
+        else:
+            # "Subtract Moonlight" => smaller total is displayed
+            st.markdown(f"""
+            <div class="result-box">
+                <div class="result-title">Astro Darkness (Subtracting Moonlight)</div>
+                <div class="result-value">{ta_h}h {ta_m}m</div>
+            </div>
+            """, unsafe_allow_html=True)
+            # Optionally also show the bigger 'astro' if ignoring moon:
+            st.markdown(f"*(If ignoring moon, it would be {tm_h}h {tm_m}m of moonless time)*")
+
+        st.markdown("#### Night-by-Night Breakdown")
+        df = pd.DataFrame(nights)
+        df.rename(columns={
+            "night_label": "Night of",
+            "astro_dark_hours": "Astro (hrs)",
+            "moonless_hours": "Moonless (hrs)",
+            "moon_phase": "Phase"
+        }, inplace=True)
+        st.dataframe(df, use_container_width=True)
+
+    st.markdown("#### Debug / Progress Console")
+    st.text_area(
+        "Progress Console",
+        value=st.session_state["progress_console"],
+        height=150,
+        disabled=True,
+        label_visibility="collapsed"
+    )
+
+if __name__ == "__main__":
+    main()
