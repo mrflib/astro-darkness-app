@@ -7,7 +7,7 @@ MAX_DAYS = 30
 STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
 DEBUG = True
-LOCATIONIQ_TOKEN = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
+# Removed hardcoded LOCATIONIQ_TOKEN
 ######## END CONFIG BLOCK ###############
 
 import streamlit as st
@@ -93,11 +93,11 @@ def moon_phase_icon(phase_deg):
 ########################################
 # LocationIQ city + reverse
 ########################################
-def geocode_city(city_name):
+def geocode_city(city_name, token):
     """City->(lat,lon) with LocationIQ /v1/search."""
     if not USE_CITY_SEARCH or not city_name.strip():
         return None
-    url = f"https://us1.locationiq.com/v1/search?key={LOCATIONIQ_TOKEN}&q={city_name}&format=json"
+    url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -114,11 +114,11 @@ def geocode_city(city_name):
         debug_print(f"City lookup error: {e}")
     return None
 
-def reverse_geocode(lat, lon):
+def reverse_geocode(lat, lon, token):
     """(lat,lon)-> city with LocationIQ /v1/reverse."""
     if not USE_CITY_SEARCH:
         return None
-    url = f"https://us1.locationiq.com/v1/reverse?key={LOCATIONIQ_TOKEN}&lat={lat}&lon={lon}&format=json"
+    url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -171,7 +171,7 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
 ########################################
 # Astro Calculation
 ########################################
-def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar):
+def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar, token):
     """
     Performs the astronomical darkness calculations and updates the progress console and progress bar.
     Returns the day-by-day results.
@@ -311,8 +311,8 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 # MAIN
 ########################################
 def main():
-    st.title("Astronomical Darkness Calculator")
-    st.markdown("##### Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
+    st.markdown("<h2>Astronomical Darkness Calculator</h2>", unsafe_allow_html=True)
+    st.markdown("<h4>Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.</h4>", unsafe_allow_html=True)
 
     # Initialize session defaults if missing
     if "city" not in st.session_state:
@@ -328,6 +328,9 @@ def main():
     if "last_click" not in st.session_state:
         st.session_state["last_click"] = None  # To track last processed click
 
+    # Retrieve the LocationIQ token from secrets
+    LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
+
     # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
     input_cols = st.columns(3)
@@ -340,7 +343,7 @@ def main():
             )
             if cval != st.session_state["city"]:
                 # User typed a new city
-                coords = geocode_city(cval)
+                coords = geocode_city(cval, LOCATIONIQ_TOKEN)
                 if coords:
                     st.session_state["lat"], st.session_state["lon"] = coords
                     st.session_state["city"] = cval
@@ -432,7 +435,7 @@ def main():
             if st.session_state["last_click"] != current_click:
                 st.session_state["lat"], st.session_state["lon"] = current_click
                 # Perform reverse geocoding to get city
-                city = reverse_geocode(map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
+                city = reverse_geocode(map_click['last_clicked']['lat'], map_click['last_clicked']['lng'], LOCATIONIQ_TOKEN)
                 if city:
                     st.session_state["city"] = city
                     st.success(f"Location updated to {city} ({map_click['last_clicked']['lat']:.4f}, {map_click['last_clicked']['lng']:.4f})")
@@ -512,7 +515,8 @@ def main():
                 end_date,
                 moon_affect,
                 step_min,
-                progress_bar
+                progress_bar,
+                LOCATIONIQ_TOKEN
             )
 
             # Final update to progress bar
@@ -572,11 +576,17 @@ def main():
             })
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
-            try:
-                st.dataframe(df.style.hide_index())
-            except AttributeError:
-                # For older Pandas versions without hide_index()
-                st.dataframe(df)
+            # Attempt to hide the index
+            if hasattr(pd.DataFrame.style, 'hide_index'):
+                styled_df = df.style.hide_index()
+                st.dataframe(styled_df)
+            else:
+                # Convert to HTML without index
+                def hide_dataframe_row_index(df):
+                    return df.to_html(index=False)
+
+                html_table = hide_dataframe_row_index(df)
+                st.markdown(html_table, unsafe_allow_html=True)
                 st.warning("Your Pandas version does not support 'hide_index()'. The index column is displayed.")
 
 # Run the app
