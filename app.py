@@ -341,34 +341,6 @@ def main():
             help=f"Select a date range of up to {MAX_DAYS} days."
         )
 
-        # Process the selected dates
-        dvals = st.session_state["selected_dates"]
-
-        if isinstance(dvals, (list, tuple)):
-            if len(dvals) == 1:
-                st.session_state["start_date"] = dvals[0]
-                st.session_state["end_date"] = dvals[0]
-            elif len(dvals) == 2:
-                start, end = dvals
-                delta_days = (end - start).days + 1
-                if delta_days > MAX_DAYS:
-                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
-                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-                    st.session_state["start_date"] = start
-                    st.session_state["end_date"] = adjusted_end
-                elif start > end:
-                    st.warning("Start date must be before or equal to end date.")
-                else:
-                    st.session_state["start_date"], st.session_state["end_date"] = start, end
-            else:
-                st.warning("Please select either a single date or a valid date range.")
-        else:
-            if isinstance(dvals, date):
-                st.session_state["start_date"] = dvals
-                st.session_state["end_date"] = dvals
-            else:
-                st.warning("Please select either a single date or a valid date range.")
-
     with input_cols[2]:
         # Allowed Deviation Minutes Selector
         step_options = {
@@ -452,17 +424,41 @@ def main():
         label_visibility="collapsed"
     )
 
-    # Check day range
-    delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
-    if delta_days > MAX_DAYS:
-        st.error(f"Please pick {MAX_DAYS} days or fewer.")
-        return
-
-    # Calculate
+    # Process the selected dates only when the Calculate button is pressed
     if calculate_button:
-        if st.session_state["start_date"] > st.session_state["end_date"]:
-            st.error("Start date must be <= end date.")
-            return
+        # Extract the selected dates
+        dvals = st.session_state["selected_dates"]
+
+        if isinstance(dvals, (list, tuple)):
+            if len(dvals) == 1:
+                st.session_state["start_date"] = dvals[0]
+                st.session_state["end_date"] = dvals[0]
+            elif len(dvals) == 2:
+                start, end = dvals
+                delta_days = (end - start).days + 1
+                if delta_days > MAX_DAYS:
+                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
+                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+                    st.session_state["start_date"] = start
+                    st.session_state["end_date"] = adjusted_end
+                elif start > end:
+                    st.warning("Start date must be before or equal to end date.")
+                else:
+                    st.session_state["start_date"], st.session_state["end_date"] = start, end
+            else:
+                st.warning("Please select either a single date or a valid date range.")
+        else:
+            if isinstance(dvals, date):
+                st.session_state["start_date"] = dvals
+                st.session_state["end_date"] = dvals
+            else:
+                st.warning("Please select either a single date or a valid date range.")
+
+        # Check day range
+        delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
+        if delta_days > MAX_DAYS:
+            st.error(f"Please pick {MAX_DAYS} days or fewer.")
+            st.stop()
 
         # Reset console
         st.session_state["progress_console"] = ""
@@ -491,7 +487,7 @@ def main():
 
         if not daily_data:
             st.warning("No data?? Possibly 0-day range or an error.")
-            return
+            st.stop()
 
         total_astro = sum(d["astro_dark_hours"] for d in daily_data)
         total_moonless = sum(d["moonless_hours"] for d in daily_data)
