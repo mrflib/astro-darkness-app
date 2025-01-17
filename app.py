@@ -545,6 +545,6 @@ st.markdown(
         color: #FFF !important;
     }
     </style>
-    \"\"\",
+    """,
     unsafe_allow_html=True
 )
