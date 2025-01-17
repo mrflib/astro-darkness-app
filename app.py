@@ -75,6 +75,7 @@ div[data-testid="stForm"] {
 ########################################
 # UTILS
 ########################################
+
 def debug_print(msg: str):
     """Append debug info to session-based console if DEBUG=True."""
     if DEBUG:
@@ -100,8 +101,48 @@ def moon_phase_icon(phase_deg):
     else:
         return "🌘"
 
+def geocode_city(city_name, token):
+    """City -> (lat, lon) using LocationIQ /v1/search. Returns None if not found."""
+    if not USE_CITY_SEARCH or not city_name.strip():
+        return None
+    url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data:
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                return (lat, lon)
+            else:
+                debug_print(f"No results for city: {city_name}")
+        else:
+            debug_print(f"City lookup code {resp.status_code}, text={resp.text}")
+    except Exception as e:
+        debug_print(f"City lookup error: {e}")
+    return None
+
+def reverse_geocode(lat, lon, token):
+    """(lat, lon)->city from LocationIQ /v1/reverse. Returns None if not found."""
+    if not USE_CITY_SEARCH:
+        return None
+    url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            address = data.get("address", {})
+            city = address.get("city") or address.get("town") or address.get("village")
+            return city if city else data.get("display_name")
+        else:
+            debug_print(f"Reverse code {resp.status_code}, text={resp.text}")
+    except Exception as e:
+        debug_print(f"Reverse error: {e}")
+    return None
+
+
 ########################################
-# MAIN CALC LOGIC
+# NIGHT-LABELED NOON->NOON CALC
 ########################################
 def compute_night_details(
     lat, lon,
@@ -113,21 +154,20 @@ def compute_night_details(
     For each local day from local noon->noon, label it "Night of D".
     We count:
       - astro_minutes if sun_alt < -threshold
-      - moonless_minutes if also moon_alt < 0
+      - moonless_minutes if moon_alt < 0 as well
     Then find crossing times for:
       - Dark Start, Dark End (sun crossing -threshold)
       - Moon Rise, Moon Set (moon crossing 0)
     Return: 
       Night, Dark Start, Dark End, Moon Rise, Moon Set, 
       Dark Hours, Moonless Hours, Phase
-    Where 'Dark Hours' is e.g. "6hrs 32min".
+    Where 'Dark Hours' is "6hrs 32min" format.
     """
     from skyfield.api import load, Topos
     ts = load.timescale()
     eph = load('de421.bsp')
     observer = eph['Earth'] + Topos(latitude_degrees=lat, longitude_degrees=lon)
 
-    # Determine local tz
     tf = TimezoneFinder()
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
@@ -176,6 +216,7 @@ def compute_night_details(
         astro_minutes = 0
         moonless_minutes = 0
         for idx in range(len(times_list)-1):
+            # Sun < -threshold
             if sun_alts[idx] < -twilight_threshold:
                 astro_minutes += step_minutes
                 if moon_alts[idx] < 0.0:
@@ -217,6 +258,7 @@ def compute_night_details(
         moonl_str = f"{m_hrs}hrs {m_min}min"
 
         # moon phase at local noon
+        from skyfield.api import load
         t_noon = ts.from_datetime(local_noon_aware.astimezone(pytz.utc))
         obs_noon = observer.at(t_noon)
         sun_ecl  = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
@@ -227,12 +269,12 @@ def compute_night_details(
         nights_data.append({
             "Night": day_label.strftime("%Y-%m-%d"),
             "Dark Start": dark_start,
-            "Dark End":   dark_end,
-            "Moon Rise":  moon_rise,
-            "Moon Set":   moon_set,
+            "Dark End": dark_end,
+            "Moon Rise": moon_rise,
+            "Moon Set": moon_set,
             "Dark Hours": astro_str,
             "Moonless Hours": moonl_str,
-            "Phase": phase_emoji  # now has a header "Phase"
+            "Phase": phase_emoji
         })
 
     return nights_data
@@ -313,23 +355,21 @@ def main():
             if st.session_state["last_map_click"] != (clat, clon):
                 st.session_state["lat"] = clat
                 st.session_state["lon"] = clon
-                ccity = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
-                if ccity:
-                    st.session_state["city"] = ccity
-                    st.success(f"Map => {ccity} ({clat:.4f}, {clon:.4f})")
+                cfound = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
+                if cfound:
+                    st.session_state["city"] = cfound
+                    st.success(f"Map => {cfound} ({clat:.4f}, {clon:.4f})")
                 else:
                     st.success(f"Map => lat/lon=({clat:.4f}, {clon:.4f})")
                 st.session_state["last_map_click"] = (clat, clon)
 
-    # Additional note under the map
     st.write("You may need to click the map a few times to make it work! Free API fun! :)")
 
-    # Next row (form) for date range, twilight threshold, time step
+    # Next row (form) for date range, threshold, time step
     st.markdown("### Calculate Darkness")
     with st.form("calc_form"):
         row2 = st.columns(3)
         with row2[0]:
-            # date range
             dval = st.date_input(
                 "Pick up to 30 days",
                 value=st.session_state["dates_range"],
@@ -368,6 +408,7 @@ def main():
         calc_btn = st.form_submit_button("Calculate")
 
     if calc_btn:
+        # parse date range
         if len(dval) == 1:
             start_d = dval[0]
             end_d   = dval[0]
@@ -409,12 +450,12 @@ def main():
         total_moonless_min = 0
         for rowdict in nights_data:
             # "Dark Hours" => "6hrs 32min"
-            d_hrs_str = rowdict["Dark Hours"].split("hrs")[0].strip()  # "6"
-            d_min_str = rowdict["Dark Hours"].split("hrs")[1].replace("min","").strip()  # "32"
+            d_hrs_str = rowdict["Dark Hours"].split("hrs")[0].strip()
+            d_min_str = rowdict["Dark Hours"].split("hrs")[1].replace("min","").strip()
             d_hrs = int(d_hrs_str)
             d_m   = int(d_min_str)
 
-            # "Moonless Hours" => e.g. "4hrs 17min"
+            # "Moonless Hours" => "4hrs 17min"
             m_hrs_str = rowdict["Moonless Hours"].split("hrs")[0].strip()
             m_min_str = rowdict["Moonless Hours"].split("hrs")[1].replace("min","").strip()
             m_hrs = int(m_hrs_str)
@@ -448,7 +489,6 @@ def main():
         df = pd.DataFrame(nights_data)
 
         # We'll center all cells, including headers, and center the table. 
-        # We can use .style for that:
         df_styled = df.style.set_properties(**{'text-align': 'center'})
         df_styled.set_table_styles([
             {'selector': 'th', 'props': [('text-align', 'center')]},
@@ -456,7 +496,6 @@ def main():
             {'selector': 'table', 'props': [('margin', '0 auto')]},  # center table
         ])
 
-        # Display styled DataFrame
         st.markdown(df_styled.to_html(index=True), unsafe_allow_html=True)
 
         st.markdown("#### Progress Console")
