@@ -355,7 +355,7 @@ def main():
             f"Pick up to {MAX_DAYS} days",
             value=st.session_state["selected_dates"],
             key="selected_dates",
-            help=f"Select a date range of up to {MAX_DAYS} days."
+            help=f"Select a date range of up to {MAX_DAYS} days. You may need to select the date range with two clicks due to Streamlit limitations. Double check dates are correct before calculating."
         )
         # **Important:** Do **not** modify `st.session_state["selected_dates"]` after widget instantiation
 
@@ -421,6 +421,7 @@ def main():
 
     # **Moved the Map Below Coordinates & Moon Influence and Above Calculate Button**
     st.markdown("#### Select Location on Map")
+    st.markdown("<h5>You may need to click the map twice to make it register a new location. Free API fun :)</h5>", unsafe_allow_html=True)
     with st.expander("View Map"):
         folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
         folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
@@ -571,7 +572,12 @@ def main():
             })
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
-            st.dataframe(df.style.hide_index())
+            try:
+                st.dataframe(df.style.hide_index())
+            except AttributeError:
+                # For older Pandas versions without hide_index()
+                st.dataframe(df)
+                st.warning("Your Pandas version does not support 'hide_index()'. The index column is displayed.")
 
 # Run the app
 if __name__=="__main__":
