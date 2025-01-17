@@ -1,9 +1,9 @@
-streamlit
+pandas>=1.4.0
 requests
-pandas
 skyfield
 geopy
 timezonefinder
 pytz
 folium
 streamlit-folium
+pillow>=9.5.0
