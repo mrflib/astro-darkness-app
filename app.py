@@ -32,10 +32,10 @@ st.set_page_config(
     layout="centered"
 )
 
-# We keep your custom CSS, plus we add rules to style the date picker.
+# We keep your custom CSS, but we now add *more specific* styling for the date picker.
 st.markdown("""
 <style>
-    /* Existing custom styles */
+    /* ========== EXISTING CUSTOM STYLES ========== */
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
@@ -61,50 +61,83 @@ st.markdown("""
         font-weight: bold;
     }
 
-    /* 
-     * NEW: Custom CSS to style the date_range_picker so it
-     * matches a dark theme and is large enough when expanded.
-     */
-    /* This is the text box style (the collapsed widget) */
+    /* ========== NEW: OVERRIDES FOR STREAMLIT-DATE-PICKER ========== */
+    /* Collapsed widget (the text input) */
     .ant-picker-input > input {
-        background-color: #202123 !important; /* match your dark bg */
-        color: #E8EAED !important;            /* match your light text */
-        border: 1px solid #555 !important;    /* subtle border like old date_input */
+        background-color: #202123 !important; /* your dark bg */
+        color: #E8EAED !important;            /* your light text */
+        border: 1px solid #555 !important;
         border-radius: 0.25rem !important;
+        padding: 6px !important;
     }
     .ant-picker-range {
         background-color: #202123 !important;
         color: #E8EAED !important;
         border: 1px solid #555 !important;
         border-radius: 0.25rem !important;
+        padding: 6px !important;
+    }
+    .ant-picker-suffix {
+        color: #E8EAED !important;
     }
 
-    /* This is the drop-down calendar style (the expanded widget) */
+    /* Expanded calendar container */
     .ant-picker-dropdown {
         background-color: #202123 !important;
         color: #E8EAED !important;
         border: 1px solid #555 !important;
         border-radius: 0.25rem !important;
-        /* Make sure it's wide/tall enough so days don't get cropped */
-        width: 350px !important;
-        min-height: 300px !important;
+        /* Force more width & height so it's not cropped */
+        min-width: 380px !important;
+        min-height: 400px !important;
     }
-    /* The date cells */
+    /* The main panel wrapper inside the dropdown */
+    .ant-picker-panel-container {
+        width: 380px !important;
+        min-height: 400px !important;
+    }
+    /* The panel that actually holds the months/days */
+    .ant-picker-panel {
+        width: 100% !important;
+        min-height: 350px !important;
+    }
+    /* The range part for two months side by side (if range includes time) */
+    .ant-picker-panels {
+        display: flex !important;
+        gap: 12px !important;
+    }
+
+    /* Dates text color & hover */
     .ant-picker-cell-inner {
+        color: #E8EAED !important; 
+    }
+    .ant-picker-cell-inner:hover {
+        background-color: #3A3B3C !important;
+        color: #FFF !important;
+    }
+    /* Selected day highlight */
+    .ant-picker-cell-selected .ant-picker-cell-inner {
+        background-color: #565758 !important;
+        color: #FFF !important;
+    }
+
+    /* Today ring highlight */
+    .ant-picker-cell-today .ant-picker-cell-inner::before {
+        border: 1px solid #999 !important;
+    }
+
+    /* Footer ranges or "Today" button, if any */
+    .ant-picker-footer,
+    .ant-picker-ranges {
+        background-color: #202123 !important;
         color: #E8EAED !important;
     }
-    /* Hover & selected states */
-    .ant-picker-cell-inner:hover, .ant-picker-cell-selected .ant-picker-cell-inner {
-        background-color: #2A2D2E !important;
+    .ant-picker-footer .ant-picker-footer-extra {
         color: #E8EAED !important;
     }
-    /* Today highlight ring */
     .ant-picker-today-btn {
         background: #333 !important;
         color: #E8EAED !important;
-    }
-    .ant-picker-cell-today .ant-picker-cell-inner::before {
-        border: 1px solid #999 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -389,7 +422,6 @@ def main():
             st.write("City search is OFF")
 
     with input_cols[1]:
-        # Our new range picker, styled to mimic old date_input in dark mode
         st.markdown("**Select Date Range**")
 
         # Convert existing st.session_state dates to datetime for the widget
@@ -404,8 +436,7 @@ def main():
         )
 
         if date_range_res:
-            # parse the strings
-            d_start_str, d_end_str = date_range_res
+            d_start_str, d_end_str = date_range_res  # both strings
             d_start_dt = datetime.fromisoformat(d_start_str)
             d_end_dt   = datetime.fromisoformat(d_end_str)
             st.session_state["selected_dates"] = [d_start_dt.date(), d_end_dt.date()]
@@ -422,10 +453,7 @@ def main():
             "Time Accuracy (Mins)",
             options=list(step_options.keys()),
             index=0,
-            help="""This determines how precise the calculations are, in minutes.
-- Higher = faster but less precise.
-- Lower = more accurate but slower.
-"""
+            help="Higher = faster but less precise; lower = more accurate but slower."
         )
 
     # Coordinates & Moon Influence
