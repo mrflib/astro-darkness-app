@@ -10,7 +10,7 @@ DEBUG = True
 
 import streamlit as st
 from datetime import date, datetime, timedelta
-import time  # We use time.sleep(...) for partial progress
+import time
 import requests
 import pytz
 from timezonefinder import TimezoneFinder
@@ -28,10 +28,10 @@ st.set_page_config(
     layout="centered"
 )
 
-# Additional custom CSS for button hover/active in #218838, progress bar same color, form styling, etc.
+# We color the progress bar's container (#aaa) differently from its fill (#218838)
 st.markdown(r"""
 <style>
-/* The "Calculate" button normal, hover, active states => #218838 */
+/* Make the "Calculate" button #218838 on normal/hover/active */
 .stButton > button {
     background-color: #218838 !important;
     border-color: #1e7e34 !important;
@@ -45,12 +45,19 @@ st.markdown(r"""
     border-color: #1e7e34 !important;
 }
 
-/* Progress bar override to the same #218838 */
-div[role='progressbar'] div {
-    background-color: #218838 !important;
+/* 
+   Distinguish between the track (outer container) and the fill portion:
+   - Outer track => #aaa
+   - Inner fill => #218838
+*/
+div[data-testid="stProgressBar"] > div[role="progressbar"] {
+    background-color: #aaa !important;       /* Outer container/track */
+}
+div[data-testid="stProgressBar"] > div[role="progressbar"] > div {
+    background-color: #218838 !important;    /* Fill portion */
 }
 
-/* Remove any default styling on st.form */
+/* Remove default styling on st.form */
 div[data-testid="stForm"] {
     background-color: transparent !important;
     border: none !important;
@@ -58,7 +65,7 @@ div[data-testid="stForm"] {
     padding: 0 !important;
 }
 
-/* Slightly smaller radius for the result-box */
+/* Slightly smaller radius for the .result-box */
 .result-box {
     background-color: #218838;
     color: white;
@@ -81,6 +88,7 @@ div[data-testid="stForm"] {
 ########################################
 # UTILS
 ########################################
+
 def debug_print(msg: str):
     """Append debug info to session-based console if DEBUG=True."""
     if DEBUG:
@@ -107,14 +115,14 @@ def moon_phase_icon(phase_deg):
         return "🌘"
 
 def geocode_city(city_name, token):
-    """City -> (lat, lon) using LocationIQ /v1/search. Returns None if not found."""
-    # (unchanged)
-    ...
+    """City -> (lat, lon) using LocationIQ /v1/search."""
+    # (same code as before) ...
+    pass
 
 def reverse_geocode(lat, lon, token):
-    """(lat, lon)->city from LocationIQ /v1/reverse. Returns None if not found."""
-    # (unchanged)
-    ...
+    """(lat, lon)->city from LocationIQ /v1/reverse."""
+    # (same code as before) ...
+    pass
 
 ########################################
 # NIGHT-LABELED NOON->NOON CALC
@@ -127,9 +135,8 @@ def compute_night_details(
     pbar
 ):
     """
-    For each local day in [start_date, end_date], label it "Night of D" (noon->noon).
-    We'll update 'pbar' once per day, pausing briefly with time.sleep(0.1),
-    so you see partial increments.
+    We'll update 'pbar' each day to show partial progress, 
+    plus time.sleep(0.1) to ensure the increments appear visually.
     """
     from skyfield.api import load, Topos
     ts = load.timescale()
@@ -150,14 +157,13 @@ def compute_night_details(
     nights_data = []
     total_days = (end_date - start_date).days + 1
 
-    for day_i in range(total_days):
-        # Partial progress fraction
-        fraction = (day_i + 1) / total_days
+    for i in range(total_days):
+        # partial fraction
+        fraction = (i + 1) / total_days
         pbar.progress(fraction)
-        # Force a short pause so the UI can render intermediate states
-        time.sleep(0.1)
+        time.sleep(0.1)  # force a short pause to let UI render
 
-        day_label = start_date + timedelta(days=day_i)
+        day_label = start_date + timedelta(days=i)
         debug_print(f"Processing 'Night of {day_label}' (noon->noon).")
 
         local_noon_dt = datetime(day_label.year, day_label.month, day_label.day, 12, 0, 0)
@@ -252,7 +258,6 @@ def main():
     st.title("Astronomical Darkness Calculator (Night-Labeled)")
     st.write("Either enter a city, lat/long, or click the map, then pick date range & press Calculate.")
 
-    # Initialize session state
     if "progress_console" not in st.session_state:
         st.session_state["progress_console"] = ""
     if "city" not in st.session_state:
@@ -268,10 +273,10 @@ def main():
 
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
-    # Coordinates
+    # Coordinates + city
     st.markdown("#### Coordinates & City Input")
-    top_cols = st.columns(3)
-    with top_cols[0]:
+    rowc = st.columns(3)
+    with rowc[0]:
         cval = st.text_input("City (optional)", value=st.session_state["city"])
         if cval != st.session_state["city"]:
             coords = geocode_city(cval, LOCATIONIQ_TOKEN)
@@ -282,25 +287,15 @@ def main():
             else:
                 st.warning("City not found or usage limit. Keeping old coords.")
 
-    with top_cols[1]:
-        lat_in = st.number_input(
-            "Latitude",
-            value=st.session_state["lat"],
-            format="%.6f",
-            min_value=-90.0,
-            max_value=90.0
-        )
+    with rowc[1]:
+        lat_in = st.number_input("Latitude", value=st.session_state["lat"], format="%.6f",
+                                 min_value=-90.0, max_value=90.0)
         if abs(lat_in - st.session_state["lat"]) > 1e-7:
             st.session_state["lat"] = lat_in
 
-    with top_cols[2]:
-        lon_in = st.number_input(
-            "Longitude",
-            value=st.session_state["lon"],
-            format="%.6f",
-            min_value=-180.0,
-            max_value=180.0
-        )
+    with rowc[2]:
+        lon_in = st.number_input("Longitude", value=st.session_state["lon"], format="%.6f",
+                                 min_value=-180.0, max_value=180.0)
         if abs(lon_in - st.session_state["lon"]) > 1e-7:
             st.session_state["lon"] = lon_in
 
@@ -309,137 +304,123 @@ def main():
     st.write("You may need to click the map a few times to make it work! Free API fun! :)")
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
     folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Current").add_to(fol_map)
-    map_res = st_folium(fol_map, width=700, height=450)
-    if map_res and "last_clicked" in map_res and map_res["last_clicked"]:
-        clat = map_res["last_clicked"]["lat"]
-        clon = map_res["last_clicked"]["lng"]
+    map_out = st_folium(fol_map, width=700, height=450)
+    if map_out and "last_clicked" in map_out and map_out["last_clicked"]:
+        clat = map_out["last_clicked"]["lat"]
+        clon = map_out["last_clicked"]["lng"]
         if -90 <= clat <= 90 and -180 <= clon <= 180:
             if st.session_state["last_map_click"] != (clat, clon):
                 st.session_state["lat"] = clat
                 st.session_state["lon"] = clon
-                cfound = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
-                if cfound:
-                    st.session_state["city"] = cfound
-                    st.success(f"Map => {cfound} ({clat:.4f}, {clon:.4f})")
+                found_c = reverse_geocode(clat, clon, LOCATIONIQ_TOKEN)
+                if found_c:
+                    st.session_state["city"] = found_c
+                    st.success(f"Map => {found_c} ({clat:.4f}, {clon:.4f})")
                 else:
                     st.success(f"Map => lat/lon=({clat:.4f}, {clon:.4f})")
                 st.session_state["last_map_click"] = (clat, clon)
 
-    # Form
+    # The form
     st.markdown("### Calculate Darkness")
     with st.form("calc_form"):
-        row2 = st.columns(3)
-        with row2[0]:
-            dval = st.date_input(
-                "Pick up to 30 days",
-                value=st.session_state["dates_range"]
-            )
-        with row2[1]:
-            threshold_opts = {
-                "Civil (−6)": 6,
-                "Nautical (−12)": 12,
-                "Astronomical (−18)": 18
-            }
-            thr_label = st.selectbox(
-                "Twilight Threshold",
-                list(threshold_opts.keys()),
-                index=2
-            )
-            twilight_threshold = threshold_opts[thr_label]
-        with row2[2]:
-            step_opts = ["1", "2", "5", "10", "15", "30"]
-            step_str = st.selectbox("Time Step (Mins)", step_opts, 0)
+        rowx = st.columns(3)
+        with rowx[0]:
+            dval = st.date_input("Pick up to 30 days", value=st.session_state["dates_range"])
+        with rowx[1]:
+            thr_dict = {"Civil (−6)": 6, "Nautical (−12)": 12, "Astronomical (−18)": 18}
+            thr_label = st.selectbox("Twilight Threshold", list(thr_dict.keys()), index=2)
+            threshold_val = thr_dict[thr_label]
+        with rowx[2]:
+            steps = ["1", "2", "5", "10", "15", "30"]
+            step_str = st.selectbox("Time Step (Mins)", steps, 0)
             step_minutes = int(step_str)
 
         calc_btn = st.form_submit_button("Calculate")
 
     if calc_btn:
         if len(dval) == 1:
-            start_d = dval[0]
-            end_d   = dval[0]
+            sd = dval[0]
+            ed = dval[0]
         else:
-            start_d, end_d = dval[0], dval[-1]
+            sd, ed = dval[0], dval[-1]
 
-        day_count = (end_d - start_d).days + 1
-        if day_count > MAX_DAYS:
-            st.error(f"You picked {day_count} days, max allowed is {MAX_DAYS}.")
+        days_sel = (ed - sd).days + 1
+        if days_sel > MAX_DAYS:
+            st.error(f"You picked {days_sel} days, max is {MAX_DAYS}.")
             st.stop()
-        if start_d > end_d:
+        if sd > ed:
             st.error("Start date must be <= end date.")
             st.stop()
 
-        st.session_state["dates_range"] = (start_d, end_d)
+        st.session_state["dates_range"] = (sd, ed)
         st.session_state["progress_console"] = ""
-        debug_print(f"Starting night-labeled calculations for {day_count} days...")
+        debug_print(f"Starting night-labeled calculations for {days_sel} days...")
 
-        # Show progress bar
+        # Show progress bar in a placeholder
         pbar_placeholder = st.empty()
         pbar = pbar_placeholder.progress(0)
 
-        # Perform the calculation
+        # call function
         nights_data = compute_night_details(
             st.session_state["lat"],
             st.session_state["lon"],
-            start_d,
-            end_d,
-            twilight_threshold,
+            sd, ed,
+            threshold_val,
             step_minutes,
             pbar
         )
 
         if not nights_data:
-            st.warning("No data?? Possibly 0-day range or an error.")
+            st.warning("No data?? Possibly 0-day range or error.")
             st.stop()
 
         # Summaries
         total_astro_min = 0
         total_moonless_min = 0
-        for rowdict in nights_data:
-            # "Dark Hours" => "6hrs 32min"
-            d_hrs_str = rowdict["Dark Hours"].split("hrs")[0].strip()
-            d_min_str = rowdict["Dark Hours"].split("hrs")[1].replace("min","").strip()
-            d_hrs = int(d_hrs_str)
-            d_m   = int(d_min_str)
+        for rowd in nights_data:
+            # parse "Dark Hours" => "6hrs 32min"
+            parts = rowd["Dark Hours"].split("hrs")
+            d_hrs = int(parts[0].strip())
+            d_min = int(parts[1].replace("min","").strip())
 
-            # "Moonless Hours" => "4hrs 17min"
-            m_hrs_str = rowdict["Moonless Hours"].split("hrs")[0].strip()
-            m_min_str = rowdict["Moonless Hours"].split("hrs")[1].replace("min","").strip()
-            m_hrs = int(m_hrs_str)
-            m_m   = int(m_min_str)
+            # parse "Moonless Hours" => "4hrs 15min"
+            parts2 = rowd["Moonless Hours"].split("hrs")
+            m_hrs = int(parts2[0].strip())
+            m_min = int(parts2[1].replace("min","").strip())
 
-            total_astro_min += d_hrs * 60 + d_m
-            total_moonless_min += m_hrs * 60 + m_m
+            total_astro_min += d_hrs*60 + d_min
+            total_moonless_min += m_hrs*60 + m_min
 
         st.markdown("#### Results")
-        r_cols = st.columns(2)
-        with r_cols[0]:
-            a_h = total_astro_min // 60
-            a_m = total_astro_min % 60
+        boxes = st.columns(2)
+        with boxes[0]:
+            A_h = total_astro_min // 60
+            A_m = total_astro_min % 60
             st.markdown(f"""
             <div class="result-box">
               <div class="result-title">Total Astro Darkness</div>
-              <div class="result-value">{a_h}hrs {a_m}min</div>
+              <div class="result-value">{A_h}hrs {A_m}min</div>
             </div>
             """, unsafe_allow_html=True)
-        with r_cols[1]:
-            mo_h = total_moonless_min // 60
-            mo_m = total_moonless_min % 60
+        with boxes[1]:
+            M_h = total_moonless_min // 60
+            M_m = total_moonless_min % 60
             st.markdown(f"""
             <div class="result-box">
               <div class="result-title">Total Moonless Dark</div>
-              <div class="result-value">{mo_h}hrs {mo_m}min</div>
+              <div class="result-value">{M_h}hrs {M_m}min</div>
             </div>
             """, unsafe_allow_html=True)
 
         st.markdown("#### Night-by-Night Breakdown")
         df = pd.DataFrame(nights_data)
-        df_styled = df.style.set_properties(**{'text-align': 'center'})
-        df_styled.set_table_styles([
-            {'selector': 'th', 'props': [('text-align', 'center')]},
-            {'selector': 'td', 'props': [('text-align', 'center')]},
-            {'selector': 'table', 'props': [('margin', '0 auto')]}
+        styled = df.style.set_properties(**{"text-align": "center"})
+        styled.set_table_styles([
+            {"selector": "th", "props": [("text-align","center")]},
+            {"selector": "td", "props": [("text-align","center")]},
+            {"selector": "table", "props": [("margin","0 auto")]}
         ])
-        st.markdown(df_styled.to_html(index=True), unsafe_allow_html=True)
+        st.markdown(styled.to_html(index=True), unsafe_allow_html=True)
 
         st.markdown("#### Progress Console")
         st.text_area("Progress Console",
