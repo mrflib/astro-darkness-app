@@ -522,7 +522,7 @@ if __name__ == "__main__":
 # FINAL forced injection of dark-themed CSS after everything else
 #
 st.markdown(
-    \"\"\"
+    """
     <style>
     /* Put extremely specific or !important rules here so they override any re-injected defaults. */
     body .ant-picker-dropdown,
