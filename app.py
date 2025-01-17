@@ -7,7 +7,6 @@ MAX_DAYS = 30
 STEP_MINUTES = 1  # Default value; will be overridden by user selection
 USE_CITY_SEARCH = True
 DEBUG = True
-LOCATIONIQ_TOKEN = "pk.adea9a047c0d5d483f99ee4ae1b4b08d"
 ######## END CONFIG BLOCK ###############
 
 import streamlit as st
@@ -30,9 +29,10 @@ st.set_page_config(
     layout="centered"
 )
 
-# Enlarge the “No Moon” checkbox and set fixed-width font for Progress Console
+# Custom CSS for styling result boxes and other elements
 st.markdown("""
 <style>
+    /* Enlarge the checkbox */
     .stCheckbox > div:first-child {
         transform: scale(1.2); 
         margin-top: 5px;
@@ -44,7 +44,7 @@ st.markdown("""
     }
     /* Style for result boxes */
     .result-box {
-        background-color: #28a745; /* Bootstrap green */
+        background-color: #28a745; /* Green background */
         color: white;
         border-radius: 15px;
         padding: 20px;
@@ -93,11 +93,11 @@ def moon_phase_icon(phase_deg):
 ########################################
 # LocationIQ city + reverse
 ########################################
-def geocode_city(city_name):
-    """City->(lat,lon) with LocationIQ /v1/search."""
+def geocode_city(city_name, token):
+    """City -> (lat, lon) using LocationIQ /v1/search."""
     if not USE_CITY_SEARCH or not city_name.strip():
         return None
-    url = f"https://us1.locationiq.com/v1/search?key={LOCATIONIQ_TOKEN}&q={city_name}&format=json"
+    url = f"https://us1.locationiq.com/v1/search?key={token}&q={city_name}&format=json"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -114,11 +114,11 @@ def geocode_city(city_name):
         debug_print(f"City lookup error: {e}")
     return None
 
-def reverse_geocode(lat, lon):
-    """(lat,lon)-> city with LocationIQ /v1/reverse."""
+def reverse_geocode(lat, lon, token):
+    """(lat, lon) -> city using LocationIQ /v1/reverse."""
     if not USE_CITY_SEARCH:
         return None
-    url = f"https://us1.locationiq.com/v1/reverse?key={LOCATIONIQ_TOKEN}&lat={lat}&lon={lon}&format=json"
+    url = f"https://us1.locationiq.com/v1/reverse?key={token}&lat={lat}&lon={lon}&format=json"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -147,13 +147,13 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     found_start = False
 
     for i in range(N-1):
-        # crossing from alt >= -18 -> < -18 => dark start
+        # Crossing from alt >= -18 -> < -18 => dark start
         if sun_alts[i] >= -18 and sun_alts[i+1] < -18 and not found_start:
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             start_str = dt_loc.strftime("%H:%M")
             found_start = True
-        # crossing from alt < -18 -> >= -18 => dark end
-        elif sun_alts[i] < -18 and sun_alts[i+1] >= -18 and found_start and end_str=="-":
+        # Crossing from alt < -18 -> >= -18 => dark end
+        elif sun_alts[i] < -18 and sun_alts[i+1] >= -18 and found_start and end_str == "-":
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             end_str = dt_loc.strftime("%H:%M")
             break
@@ -171,7 +171,7 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
 ########################################
 # Astro Calculation
 ########################################
-def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar):
+def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minutes, progress_bar, token):
     """
     Performs the astronomical darkness calculations and updates the progress console and progress bar.
     Returns the day-by-day results.
@@ -184,7 +184,11 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
         tz_name = "UTC"
-    local_tz = pytz.timezone(tz_name)
+    try:
+        local_tz = pytz.timezone(tz_name)
+    except pytz.UnknownTimeZoneError:
+        local_tz = pytz.utc
+        debug_print(f"Unknown timezone for coordinates ({lat}, {lon}). Defaulting to UTC.")
     debug_print(f"Local Timezone: {tz_name}")
 
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
@@ -216,11 +220,16 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         progress = (day_count + 1) / MAX_DAYS
         progress_bar.progress(min(progress, 1.0))
 
-        # local midnight -> next local midnight
+        # Local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
-        start_aware = local_tz.localize(local_mid)
-        end_aware = local_tz.localize(local_next)
+        try:
+            start_aware = local_tz.localize(local_mid, is_dst=None)
+            end_aware = local_tz.localize(local_next, is_dst=None)
+        except Exception as e:
+            debug_print(f"Timezone localization error: {e}")
+            start_aware = pytz.utc.localize(local_mid)
+            end_aware = pytz.utc.localize(local_next)
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
 
@@ -258,7 +267,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         moonless_mins = moonless_minutes % 60
         debug_print(f"astro_hrs={astro_hrs}, astro_mins={astro_mins}, moonless_hrs={moonless_hrs}, moonless_mins={moonless_mins}")
 
-        # crossing-based times
+        # Crossing-based times
         dark_start_str, dark_end_str = find_dark_crossings(sun_alts, times_list, local_tz)
 
         # Moon rise/set
@@ -276,7 +285,11 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 
         # Moon phase at local noon
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
-        local_noon_aware = local_tz.localize(local_noon)
+        try:
+            local_noon_aware = local_tz.localize(local_noon, is_dst=None)
+        except Exception as e:
+            debug_print(f"Timezone localization error for noon: {e}")
+            local_noon_aware = pytz.utc.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
         t_noon = ts.from_datetime(noon_utc)
         obs_noon = observer.at(t_noon)
@@ -311,8 +324,8 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 # MAIN
 ########################################
 def main():
-    st.title("Astronomical Darkness Calculator")
-    st.markdown("##### Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.")
+    st.markdown("<h2>Astronomical Darkness Calculator</h2>", unsafe_allow_html=True)
+    st.markdown("<h4>Find how many hours of true night you get, anywhere in the world. Perfect for planning astronomy holidays to maximize dark sky time.</h4>", unsafe_allow_html=True)
 
     # Initialize session defaults if missing
     if "city" not in st.session_state:
@@ -328,6 +341,9 @@ def main():
     if "last_click" not in st.session_state:
         st.session_state["last_click"] = None  # To track last processed click
 
+    # Retrieve the LocationIQ token from secrets
+    LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
+
     # Row for City Input, Date Range, and Time Accuracy
     st.markdown("#### Inputs")
     input_cols = st.columns(3)
@@ -340,7 +356,7 @@ def main():
             )
             if cval != st.session_state["city"]:
                 # User typed a new city
-                coords = geocode_city(cval)
+                coords = geocode_city(cval, LOCATIONIQ_TOKEN)
                 if coords:
                     st.session_state["lat"], st.session_state["lon"] = coords
                     st.session_state["city"] = cval
@@ -377,8 +393,8 @@ def main():
 - **Lower values** (like 1 minute) make calculations more accurate but take longer, especially over extended date ranges. 
 
 **Choose the level of accuracy that suits your needs:**
-- **1 minute** for short periods (a few days) e.g. for 1 min If moonrise is 17:28, it will show 17:28.
-- **5 minutes or more** for longer durations (multiple weeks) e.g. for 5 mins If moonrise is 17:28, it will show 17:30.
+- **1 minute** for short periods (a few days) e.g. If moonrise is 17:28, it will show 17:28.
+- **5 minutes or more** for longer durations (multiple weeks) e.g. If moonrise is 17:28, it will show 17:30.
 """
         )
         # Removed the ⓘ tooltip icon completely
@@ -391,7 +407,9 @@ def main():
             "Latitude",
             value=st.session_state["lat"],
             format="%.6f",
-            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
+            min_value=-90.0,
+            max_value=90.0,
+            help="Latitude in decimal degrees (e.g. 51.5074 for London). Must be between -90 and 90."
         )
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
@@ -401,7 +419,9 @@ def main():
             "Longitude",
             value=st.session_state["lon"],
             format="%.6f",
-            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
+            min_value=-180.0,
+            max_value=180.0,
+            help="Longitude in decimal degrees (e.g. -0.1278 for London). Must be between -180 and 180."
         )
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
@@ -428,18 +448,26 @@ def main():
         map_click = st_folium(folium_map, width=700, height=500)
 
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
-            current_click = (map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
-            if st.session_state["last_click"] != current_click:
-                st.session_state["lat"], st.session_state["lon"] = current_click
-                # Perform reverse geocoding to get city
-                city = reverse_geocode(map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
-                if city:
-                    st.session_state["city"] = city
-                    st.success(f"Location updated to {city} ({map_click['last_clicked']['lat']:.4f}, {map_click['last_clicked']['lng']:.4f})")
-                else:
-                    st.warning("City not found for the selected location.")
-                # Update last_click to prevent duplicate processing
-                st.session_state["last_click"] = current_click
+            clicked_lat = map_click['last_clicked']['lat']
+            clicked_lon = map_click['last_clicked']['lng']
+            # Validate clicked coordinates
+            if not (-90.0 <= clicked_lat <= 90.0):
+                st.warning(f"Clicked latitude {clicked_lat} is out of bounds (-90 to 90).")
+            elif not (-180.0 <= clicked_lon <= 180.0):
+                st.warning(f"Clicked longitude {clicked_lon} is out of bounds (-180 to 180).")
+            else:
+                current_click = (clicked_lat, clicked_lon)
+                if st.session_state["last_click"] != current_click:
+                    st.session_state["lat"], st.session_state["lon"] = current_click
+                    # Perform reverse geocoding to get city
+                    city = reverse_geocode(clicked_lat, clicked_lon, LOCATIONIQ_TOKEN)
+                    if city:
+                        st.session_state["city"] = city
+                        st.success(f"Location updated to {city} ({clicked_lat:.4f}, {clicked_lon:.4f})")
+                    else:
+                        st.warning("City not found for the selected location.")
+                    # Update last_click to prevent duplicate processing
+                    st.session_state["last_click"] = current_click
 
     # Calculate Button and Progress Bar (Remain in original position)
     st.markdown("####")
@@ -512,7 +540,8 @@ def main():
                 end_date,
                 moon_affect,
                 step_min,
-                progress_bar
+                progress_bar,
+                LOCATIONIQ_TOKEN
             )
 
             # Final update to progress bar
@@ -542,21 +571,32 @@ def main():
             total_moonless_minutes = total_moonless % 60
 
             st.markdown("#### Results")
-            result_cols = st.columns(2)
-            with result_cols[0]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Total Astro Darkness</div>
-                    <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with result_cols[1]:
-                st.markdown(f"""
-                <div class="result-box">
-                    <div class="result-title">Moonless Astro Darkness</div>
-                    <div class="result-value">{total_moonless_hours} Hours {total_moonless_minutes} Minutes</div>
-                </div>
-                """, unsafe_allow_html=True)
+            if moon_affect == "Include Moonlight":
+                result_cols = st.columns(2)
+                with result_cols[0]:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Total Astro Darkness</div>
+                        <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with result_cols[1]:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Moonless Astro Darkness</div>
+                        <div class="result-value">{total_moonless_hours} Hours {total_moonless_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                # Center the box by creating three columns and placing the box in the middle
+                empty_col1, main_col, empty_col2 = st.columns([1, 8, 1])
+                with main_col:
+                    st.markdown(f"""
+                    <div class="result-box">
+                        <div class="result-title">Total Astro Darkness</div>
+                        <div class="result-value">{total_astro_hours} Hours {total_astro_minutes} Minutes</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             st.markdown("#### Day-by-Day Breakdown")
             df = pd.DataFrame(daily_data)
@@ -572,13 +612,9 @@ def main():
             })
             # Remove row index by resetting index and dropping it
             df.reset_index(drop=True, inplace=True)
-            try:
-                st.dataframe(df.style.hide_index())
-            except AttributeError:
-                # For older Pandas versions without hide_index()
-                st.dataframe(df)
-                st.warning("Your Pandas version does not support 'hide_index()'. The index column is displayed.")
+            # Convert to HTML without index
+            html_table = df.to_html(index=False)
+            st.markdown(html_table, unsafe_allow_html=True)
 
-# Run the app
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
