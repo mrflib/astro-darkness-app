@@ -20,6 +20,22 @@ from streamlit_folium import st_folium
 from skyfield.api import load, Topos
 from time import sleep
 
+# FALLBACK: Check Streamlit version for type=range support
+try:
+    from packaging import version
+except ImportError:
+    # If packaging not installed, fallback to no range
+    version = None
+
+SUPPORTS_RANGE = False
+if version is not None:
+    # Attempt to parse Streamlit version
+    try:
+        if version.parse(st.__version__) >= version.parse("1.25.0"):
+            SUPPORTS_RANGE = True
+    except:
+        pass
+
 ########################################
 # PAGE CONFIG + Custom CSS
 ########################################
@@ -339,9 +355,8 @@ def main():
     if "selected_dates" not in st.session_state:
         st.session_state["selected_dates"] = [date.today(), date.today() + timedelta(days=1)]
     if "last_click" not in st.session_state:
-        st.session_state["last_click"] = None
+        st.session_state["last_click"] = None  # To track the last map click
 
-    # Retrieve the LocationIQ token from secrets
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
     # Row for City Input, Date Range, and Time Accuracy
@@ -366,14 +381,24 @@ def main():
             st.write("City search is OFF")
 
     with input_cols[1]:
-        # ADDED type="range" (requires Streamlit >= 1.25)
-        st.date_input(
-            f"Pick up to {MAX_DAYS} days",
-            value=st.session_state["selected_dates"],
-            key="selected_dates",
-            help=f"Select a date range of up to {MAX_DAYS} days in one go.",
-            type="range"
-        )
+        # FALLBACK: If our Streamlit supports type="range", use it; otherwise omit it.
+        if SUPPORTS_RANGE:
+            st.date_input(
+                f"Pick up to {MAX_DAYS} days",
+                value=st.session_state["selected_dates"],
+                key="selected_dates",
+                help=f"Select a date range of up to {MAX_DAYS} days in one open calendar.",
+                type="range"
+            )
+        else:
+            st.date_input(
+                f"Pick up to {MAX_DAYS} days",
+                value=st.session_state["selected_dates"],
+                key="selected_dates",
+                help=(f"Select a date range of up to {MAX_DAYS} days. "
+                      "NOTE: This older Streamlit version only picks one date at a time, "
+                      "so you'll need to re-open the calendar for the second date.")
+            )
 
     with input_cols[2]:
         step_options = {
@@ -387,13 +412,13 @@ def main():
             "Time Accuracy (Mins)",
             options=list(step_options.keys()),
             index=0,
-            help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
-- Higher values (5 or 15) are faster but less precise.
-- Lower values (1 or 2) are more accurate but slower.
+            help="""How precise the calculations are (in minutes).
+- Higher values are faster but less precise.
+- Lower values are more accurate but slower.
 """
         )
 
-    # Row for Latitude, Longitude, and Moon Influence Dropdown
+    # Row for Latitude, Longitude, and Moon Influence
     st.markdown("#### Coordinates & Moon Influence")
     coord_cols = st.columns(3)
     with coord_cols[0]:
@@ -403,7 +428,7 @@ def main():
             format="%.6f",
             min_value=-90.0,
             max_value=90.0,
-            help="Latitude in decimal degrees (e.g., 51.5074)."
+            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
         )
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
@@ -415,7 +440,7 @@ def main():
             format="%.6f",
             min_value=-180.0,
             max_value=180.0,
-            help="Longitude in decimal degrees (e.g., -0.1278)."
+            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
         )
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
@@ -432,9 +457,9 @@ def main():
             help="Choose whether to include the moon's effect on astronomical darkness."
         )
 
-    # Map Section
+    # Map section
     st.markdown("#### Select Location on Map")
-    st.markdown("<h5>Click the map once to set a new location (single-click).</h5>", unsafe_allow_html=True)
+    st.markdown("<h5>Click on the map once to set a new location (single-click).</h5>", unsafe_allow_html=True)
     with st.expander("View Map"):
         folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
         folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
@@ -443,14 +468,14 @@ def main():
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
             clicked_lat = map_click['last_clicked']['lat']
             clicked_lon = map_click['last_clicked']['lng']
-            # Validate coords
+            # Validate clicked coords
             if not (-90.0 <= clicked_lat <= 90.0):
                 st.warning(f"Clicked latitude {clicked_lat} is out of bounds (-90 to 90).")
             elif not (-180.0 <= clicked_lon <= 180.0):
                 st.warning(f"Clicked longitude {clicked_lon} is out of bounds (-180 to 180).")
             else:
                 current_click = (clicked_lat, clicked_lon)
-                # REMOVED two-click check
+                # Update location immediately (one-click)
                 st.session_state["lat"], st.session_state["lon"] = current_click
                 city = reverse_geocode(clicked_lat, clicked_lon, LOCATIONIQ_TOKEN)
                 if city:
@@ -463,7 +488,7 @@ def main():
     st.markdown("####")
     calculate_button = st.button("Calculate")
 
-    # Progress bar placeholders
+    # Progress placeholders
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
@@ -481,12 +506,11 @@ def main():
         label_visibility="collapsed"
     )
 
-    # Date Range Extraction
+    # Date selection logic
     selected_dates = st.session_state["selected_dates"]
-    if len(selected_dates) == 2:
-        start_d, end_d = selected_dates
+    if len(selected_dates) >= 2:
+        start_d, end_d = selected_dates[:2]
     else:
-        # If user somehow only picks 1 date, fallback
         start_d = end_d = selected_dates[0]
 
     delta_days = (end_d - start_d).days + 1
@@ -494,17 +518,18 @@ def main():
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         st.stop()
 
-    # Calculate on button click
+    # Calculation
     if calculate_button:
         if start_d > end_d:
             st.error("Start date must be <= end date.")
             st.stop()
 
+        delta_days = (end_d - start_d).days + 1
         if delta_days > MAX_DAYS:
-            st.warning(f"Selected range exceeds {MAX_DAYS} days. Please select a range within {MAX_DAYS} days.")
+            st.warning(f"Selected range exceeds {MAX_DAYS} days. Please select fewer than {MAX_DAYS} days.")
             st.stop()
 
-        # Reset the console
+        # Reset console
         st.session_state["progress_console"] = ""
 
         step_min = {
@@ -539,7 +564,7 @@ def main():
         total_astro = 0
         total_moonless = 0
         for d in daily_data:
-            # Parse "0 Hours 23 Minutes" strings
+            # e.g. "0 Hours 31 Minutes"
             astro_parts = d["astro_dark_hours"].split()
             astro_hours = int(astro_parts[0])
             astro_minutes = int(astro_parts[2])
