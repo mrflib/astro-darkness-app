@@ -1,10 +1,8 @@
-pandas>=1.4.0
+streamlit>=1.25.0
 requests
-skyfield
-geopy
-timezonefinder
 pytz
+timezonefinder
 folium
 streamlit-folium
-pillow>=9.5.0
-streamlit>=1.25.0  # Bumped or pinned to 1.25.0 or later
+skyfield
+pandas
