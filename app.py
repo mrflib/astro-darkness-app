@@ -381,7 +381,7 @@ def main():
                 "Twilight Threshold",
                 options=list(threshold_opts.keys()),
                 index=2,
-                help="How dark must the Sun be?\n- Civil: sun < -6°\n- Nautical: < -12°\n- Astro: < -18°"
+                help="How many degrees below the horizon must the Sun be?\n- Civil: sun < -6°\n- Nautical: < -12°\n- Astro: < -18°"
             )
             twi_val = threshold_opts[thr_label]
 
@@ -392,8 +392,8 @@ def main():
                 options=step_opts,
                 index=0,
                 help="""How finely we check the Sun & Moon alt.
-- 1 min => ~1440 calculations/day (very precise, can be slow).
-- 15 min => 96 calculations/day (faster, less detail).
+- 1 min => ~1440 calculations/day (very precise, can be slow). Moon and Sun calculated to the minute.
+- 15 min => 96 calculations/day (faster, less detail). Moon and Sun calculated to the 15 minute (good for quick checks).
 """
             )
             step_minutes = int(step_str)
