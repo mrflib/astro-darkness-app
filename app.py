@@ -16,6 +16,8 @@ from time import sleep
 ########################################
 # CONFIG
 ########################################
+    # Retrieve the LocationIQ token from secrets
+    LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 st.set_page_config(
     page_title="Astronomical Darkness Calculator",
     page_icon="🌑",
