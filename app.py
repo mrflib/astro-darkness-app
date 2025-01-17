@@ -183,7 +183,11 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
     tz_name = tf.timezone_at(lng=lon, lat=lat)
     if not tz_name:
         tz_name = "UTC"
-    local_tz = pytz.timezone(tz_name)
+    try:
+        local_tz = pytz.timezone(tz_name)
+    except pytz.UnknownTimeZoneError:
+        local_tz = pytz.utc
+        debug_print(f"Unknown timezone for coordinates ({lat}, {lon}). Defaulting to UTC.")
     debug_print(f"Local Timezone: {tz_name}")
 
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
@@ -218,8 +222,13 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         # local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
-        start_aware = local_tz.localize(local_mid)
-        end_aware = local_tz.localize(local_next)
+        try:
+            start_aware = local_tz.localize(local_mid, is_dst=None)
+            end_aware = local_tz.localize(local_next, is_dst=None)
+        except Exception as e:
+            debug_print(f"Timezone localization error: {e}")
+            start_aware = pytz.utc.localize(local_mid)
+            end_aware = pytz.utc.localize(local_next)
         start_utc = start_aware.astimezone(pytz.utc)
         end_utc = end_aware.astimezone(pytz.utc)
 
@@ -275,7 +284,11 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
 
         # Moon phase at local noon
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
-        local_noon_aware = local_tz.localize(local_noon)
+        try:
+            local_noon_aware = local_tz.localize(local_noon, is_dst=None)
+        except Exception as e:
+            debug_print(f"Timezone localization error for noon: {e}")
+            local_noon_aware = pytz.utc.localize(local_noon)
         noon_utc = local_noon_aware.astimezone(pytz.utc)
         t_noon = ts.from_datetime(noon_utc)
         obs_noon = observer.at(t_noon)
@@ -393,7 +406,9 @@ def main():
             "Latitude",
             value=st.session_state["lat"],
             format="%.6f",
-            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
+            min_value=-90.0,
+            max_value=90.0,
+            help="Latitude in decimal degrees (e.g. 51.5074 for London). Must be between -90 and 90."
         )
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
@@ -403,7 +418,9 @@ def main():
             "Longitude",
             value=st.session_state["lon"],
             format="%.6f",
-            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
+            min_value=-180.0,
+            max_value=180.0,
+            help="Longitude in decimal degrees (e.g. -0.1278 for London). Must be between -180 and 180."
         )
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
@@ -430,18 +447,26 @@ def main():
         map_click = st_folium(folium_map, width=700, height=500)
 
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
-            current_click = (map_click['last_clicked']['lat'], map_click['last_clicked']['lng'])
-            if st.session_state["last_click"] != current_click:
-                st.session_state["lat"], st.session_state["lon"] = current_click
-                # Perform reverse geocoding to get city
-                city = reverse_geocode(map_click['last_clicked']['lat'], map_click['last_clicked']['lng'], LOCATIONIQ_TOKEN)
-                if city:
-                    st.session_state["city"] = city
-                    st.success(f"Location updated to {city} ({map_click['last_clicked']['lat']:.4f}, {map_click['last_clicked']['lng']:.4f})")
-                else:
-                    st.warning("City not found for the selected location.")
-                # Update last_click to prevent duplicate processing
-                st.session_state["last_click"] = current_click
+            clicked_lat = map_click['last_clicked']['lat']
+            clicked_lon = map_click['last_clicked']['lng']
+            # Validate clicked coordinates
+            if not (-90.0 <= clicked_lat <= 90.0):
+                st.warning(f"Clicked latitude {clicked_lat} is out of bounds (-90 to 90).")
+            elif not (-180.0 <= clicked_lon <= 180.0):
+                st.warning(f"Clicked longitude {clicked_lon} is out of bounds (-180 to 180).")
+            else:
+                current_click = (clicked_lat, clicked_lon)
+                if st.session_state["last_click"] != current_click:
+                    st.session_state["lat"], st.session_state["lon"] = current_click
+                    # Perform reverse geocoding to get city
+                    city = reverse_geocode(clicked_lat, clicked_lon, LOCATIONIQ_TOKEN)
+                    if city:
+                        st.session_state["city"] = city
+                        st.success(f"Location updated to {city} ({clicked_lat:.4f}, {clicked_lon:.4f})")
+                    else:
+                        st.warning("City not found for the selected location.")
+                    # Update last_click to prevent duplicate processing
+                    st.session_state["last_click"] = current_click
 
     # Calculate Button and Progress Bar (Remain in original position)
     st.markdown("####")
