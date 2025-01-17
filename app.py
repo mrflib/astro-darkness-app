@@ -139,7 +139,7 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     """
     Return (dark_start_str, dark_end_str) by scanning from >=-18 -> < -18 for start,
     then < -18 -> >= -18 for end. If dark_end is not found on the same day, it assumes
-    dark_end occurs on the next day and returns the time accordingly.
+    dark_end occurs on the next day.
     """
     N = len(sun_alts)
     start_str = "-"
@@ -251,8 +251,8 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         astro_minutes = 0
         moonless_minutes = 0
         for i in range(len(times_list)-1):
-            s_mid = (sun_alts[i] + sun_alts[i+1])/2
-            m_mid = (moon_alts[i] + moon_alts[i+1])/2
+            s_mid = (sun_alts[i] + sun_alts[i+1]) / 2
+            m_mid = (moon_alts[i] + moon_alts[i+1]) / 2
             if s_mid < -18.0:  # astro dark
                 astro_minutes += step_minutes
                 if moon_affect == "Ignore Moonlight":
@@ -261,9 +261,9 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
                     if m_mid < 0.0:
                         moonless_minutes += step_minutes
 
-        astro_hrs = astro_minutes//60
+        astro_hrs = astro_minutes // 60
         astro_mins = astro_minutes % 60
-        moonless_hrs = moonless_minutes//60
+        moonless_hrs = moonless_minutes // 60
         moonless_mins = moonless_minutes % 60
         debug_print(f"astro_hrs={astro_hrs}, astro_mins={astro_mins}, moonless_hrs={moonless_hrs}, moonless_mins={moonless_mins}")
 
@@ -339,7 +339,7 @@ def main():
     if "selected_dates" not in st.session_state:
         st.session_state["selected_dates"] = [date.today(), date.today() + timedelta(days=1)]
     if "last_click" not in st.session_state:
-        st.session_state["last_click"] = None  # To track last processed click
+        st.session_state["last_click"] = None
 
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
@@ -365,13 +365,14 @@ def main():
             st.write("City search is OFF")
 
     with input_cols[1]:
-        # CHANGED: Add type="range" so the calendar stays open to pick start & end together
+        # REMOVED type="range" to avoid error in older Streamlit.
+        # NOTE: Without "type=range", the date picker will close after choosing the first date.
+        # This is a Streamlit limitation on older versions.
         st.date_input(
             f"Pick up to {MAX_DAYS} days",
             value=st.session_state["selected_dates"],
             key="selected_dates",
-            help=f"Select a date range of up to {MAX_DAYS} days. Pick start and end in one go.",
-            type="range"  # <-- This ensures the user can pick start & end without the calendar closing
+            help=f"Select a date range of up to {MAX_DAYS} days. (Due to Streamlit limitations, you'll need to re-open the calendar to pick the second date.)"
         )
 
     with input_cols[2]:
@@ -387,8 +388,8 @@ def main():
             options=list(step_options.keys()),
             index=0,
             help="""This setting determines how precise the astronomical darkness calculations are, measured in minutes.
-- **Higher values** (like 5 or 15 minutes) make calculations faster but less precise.
-- **Lower values** (like 1 minute) are more accurate but slower.
+- **Higher values** (like 5 or 15) are faster but less precise.
+- **Lower values** (like 1) are more accurate but slower.
 """
         )
 
@@ -402,7 +403,7 @@ def main():
             format="%.6f",
             min_value=-90.0,
             max_value=90.0,
-            help="Latitude in decimal degrees (e.g. 51.5074 for London)."
+            help="Latitude in decimal degrees."
         )
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
@@ -414,7 +415,7 @@ def main():
             format="%.6f",
             min_value=-180.0,
             max_value=180.0,
-            help="Longitude in decimal degrees (e.g. -0.1278 for London)."
+            help="Longitude in decimal degrees."
         )
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
@@ -432,7 +433,7 @@ def main():
         )
 
     st.markdown("#### Select Location on Map")
-    st.markdown("<h5>You may need to click the map once to set a new location (updated automatically).</h5>", unsafe_allow_html=True)
+    st.markdown("<h5>Click on the map once to set a new location.</h5>", unsafe_allow_html=True)
     with st.expander("View Map"):
         folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
         folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
@@ -441,14 +442,13 @@ def main():
         if map_click and 'last_clicked' in map_click and map_click['last_clicked']:
             clicked_lat = map_click['last_clicked']['lat']
             clicked_lon = map_click['last_clicked']['lng']
-            # Validate clicked coordinates
             if not (-90.0 <= clicked_lat <= 90.0):
                 st.warning(f"Clicked latitude {clicked_lat} is out of bounds (-90 to 90).")
             elif not (-180.0 <= clicked_lon <= 180.0):
                 st.warning(f"Clicked longitude {clicked_lon} is out of bounds (-180 to 180).")
             else:
                 current_click = (clicked_lat, clicked_lon)
-                # CHANGED: Remove the "two-click" check; update on first click
+                # REMOVED the "two-click" check:
                 st.session_state["lat"], st.session_state["lon"] = current_click
                 city = reverse_geocode(clicked_lat, clicked_lon, LOCATIONIQ_TOKEN)
                 if city:
@@ -478,13 +478,12 @@ def main():
         label_visibility="collapsed"
     )
 
-    # Check day range
     selected_dates = st.session_state["selected_dates"]
-    # Because type="range" ensures a list/tuple of 2 dates
-    if len(selected_dates) == 2:
-        start_d, end_d = selected_dates
+    if len(selected_dates) >= 2:
+        start_d, end_d = selected_dates[:2]
     else:
         start_d = end_d = selected_dates[0]
+
     delta_days = (end_d - start_d).days + 1
     if delta_days > MAX_DAYS:
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
