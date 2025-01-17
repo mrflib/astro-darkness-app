@@ -4,7 +4,7 @@
 
 ########## CONFIGURATION-BLOCK ##########
 MAX_DAYS = 30
-STEP_MINUTES = 1  # Default value; will be overridden by user selection
+STEP_MINUTES = 1  # Default; overridden by user selection
 USE_CITY_SEARCH = True
 DEBUG = True
 ######## END CONFIG BLOCK ###############
@@ -20,127 +20,17 @@ from streamlit_folium import st_folium
 from skyfield.api import load, Topos
 from time import sleep
 
-# NEW: we import the 3rd-party date picker
+# 3rd-party date picker
 from streamlit_date_picker import date_range_picker, PickerType
 
 ########################################
-# PAGE CONFIG + Custom CSS
+# PAGE CONFIG
 ########################################
 st.set_page_config(
     page_title="Astronomical Darkness Calculator",
     page_icon="🌑",
     layout="centered"
 )
-
-# We keep your custom CSS, but we now add *more specific* styling for the date picker.
-st.markdown("""
-<style>
-    /* ========== EXISTING CUSTOM STYLES ========== */
-    .stCheckbox > div:first-child {
-        transform: scale(1.2); 
-        margin-top: 5px;
-        margin-bottom: 5px;
-    }
-    textarea {
-        font-family: "Courier New", Courier, monospace;
-    }
-    .result-box {
-        background-color: #28a745;
-        color: white;
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        margin: 10px;
-    }
-    .result-title {
-        font-size: 1.2em;
-        margin-bottom: 10px;
-    }
-    .result-value {
-        font-size: 1.5em;
-        font-weight: bold;
-    }
-
-    /* ========== NEW: OVERRIDES FOR STREAMLIT-DATE-PICKER ========== */
-    /* Collapsed widget (the text input) */
-    .ant-picker-input > input {
-        background-color: #202123 !important; /* your dark bg */
-        color: #E8EAED !important;            /* your light text */
-        border: 1px solid #555 !important;
-        border-radius: 0.25rem !important;
-        padding: 6px !important;
-    }
-    .ant-picker-range {
-        background-color: #202123 !important;
-        color: #E8EAED !important;
-        border: 1px solid #555 !important;
-        border-radius: 0.25rem !important;
-        padding: 6px !important;
-    }
-    .ant-picker-suffix {
-        color: #E8EAED !important;
-    }
-
-    /* Expanded calendar container */
-    .ant-picker-dropdown {
-        background-color: #202123 !important;
-        color: #E8EAED !important;
-        border: 1px solid #555 !important;
-        border-radius: 0.25rem !important;
-        /* Force more width & height so it's not cropped */
-        min-width: 380px !important;
-        min-height: 400px !important;
-    }
-    /* The main panel wrapper inside the dropdown */
-    .ant-picker-panel-container {
-        width: 380px !important;
-        min-height: 400px !important;
-    }
-    /* The panel that actually holds the months/days */
-    .ant-picker-panel {
-        width: 100% !important;
-        min-height: 350px !important;
-    }
-    /* The range part for two months side by side (if range includes time) */
-    .ant-picker-panels {
-        display: flex !important;
-        gap: 12px !important;
-    }
-
-    /* Dates text color & hover */
-    .ant-picker-cell-inner {
-        color: #E8EAED !important; 
-    }
-    .ant-picker-cell-inner:hover {
-        background-color: #3A3B3C !important;
-        color: #FFF !important;
-    }
-    /* Selected day highlight */
-    .ant-picker-cell-selected .ant-picker-cell-inner {
-        background-color: #565758 !important;
-        color: #FFF !important;
-    }
-
-    /* Today ring highlight */
-    .ant-picker-cell-today .ant-picker-cell-inner::before {
-        border: 1px solid #999 !important;
-    }
-
-    /* Footer ranges or "Today" button, if any */
-    .ant-picker-footer,
-    .ant-picker-ranges {
-        background-color: #202123 !important;
-        color: #E8EAED !important;
-    }
-    .ant-picker-footer .ant-picker-footer-extra {
-        color: #E8EAED !important;
-    }
-    .ant-picker-today-btn {
-        background: #333 !important;
-        color: #E8EAED !important;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 ########################################
 # UTILS (unchanged)
@@ -169,7 +59,7 @@ def moon_phase_icon(phase_deg):
         return "🌘"
 
 ########################################
-# LocationIQ city + reverse (unchanged)
+# Geocoding & Reverse (unchanged)
 ########################################
 def geocode_city(city_name, token):
     if not USE_CITY_SEARCH or not city_name.strip():
@@ -216,7 +106,6 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
     start_str = "-"
     end_str = "-"
     found_start = False
-
     for i in range(N-1):
         if sun_alts[i] >= -18 and sun_alts[i+1] < -18 and not found_start:
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
@@ -226,14 +115,12 @@ def find_dark_crossings(sun_alts, times_list, local_tz):
             dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
             end_str = dt_loc.strftime("%H:%M")
             break
-
     if found_start and end_str == "-":
         for i in range(N-1):
             if sun_alts[i] < -18 and sun_alts[i+1] >= -18:
                 dt_loc = times_list[i+1].utc_datetime().astimezone(local_tz)
                 end_str = dt_loc.strftime("%H:%M")
                 break
-
     return (start_str, end_str)
 
 ########################################
@@ -252,7 +139,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         local_tz = pytz.timezone(tz_name)
     except pytz.UnknownTimeZoneError:
         local_tz = pytz.utc
-        debug_print(f"Unknown timezone for coords. Defaulting to UTC.")
+        debug_print("Unknown timezone, defaulting to UTC.")
     debug_print(f"Local Timezone: {tz_name}")
 
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
@@ -271,30 +158,29 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
     day_results = []
     day_count = 0
     current = start_date
-
     total_days = (end_date - start_date).days + 1
+
     for _ in range(total_days):
         if day_count >= MAX_DAYS:
-            debug_print(f"Reached maximum day limit {MAX_DAYS}.")
+            debug_print(f"Reached max day limit {MAX_DAYS}")
             break
 
         debug_print(f"Processing day {day_count+1}: {current}")
-
         progress = (day_count + 1) / MAX_DAYS
         progress_bar.progress(min(progress, 1.0))
 
-        # Local midnight -> next local midnight
         local_mid = datetime(current.year, current.month, current.day, 0, 0, 0)
         local_next = local_mid + timedelta(days=1)
         try:
             start_aware = local_tz.localize(local_mid, is_dst=None)
-            end_aware = local_tz.localize(local_next, is_dst=None)
+            end_aware   = local_tz.localize(local_next, is_dst=None)
         except Exception as e:
             debug_print(f"Timezone error: {e}")
             start_aware = pytz.utc.localize(local_mid)
-            end_aware = pytz.utc.localize(local_next)
+            end_aware   = pytz.utc.localize(local_next)
+
         start_utc = start_aware.astimezone(pytz.utc)
-        end_utc = end_aware.astimezone(pytz.utc)
+        end_utc   = end_aware.astimezone(pytz.utc)
 
         step_count = (24*60)//step_minutes
         times_list = []
@@ -310,13 +196,12 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
             sun_alts.append(s_alt)
             moon_alts.append(m_alt)
 
-        # Summation
         astro_minutes = 0
         moonless_minutes = 0
         for i in range(len(times_list)-1):
             s_mid = (sun_alts[i] + sun_alts[i+1])/2
             m_mid = (moon_alts[i] + moon_alts[i+1])/2
-            if s_mid < -18.0:  # astro dark
+            if s_mid < -18.0:
                 astro_minutes += step_minutes
                 if moon_affect == "Ignore Moonlight":
                     moonless_minutes += step_minutes
@@ -328,6 +213,7 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
         astro_mins = astro_minutes % 60
         moonless_hrs = moonless_minutes // 60
         moonless_mins = moonless_minutes % 60
+
         debug_print(f"astro_hrs={astro_hrs}, astro_mins={astro_mins}, "
                     f"moonless_hrs={moonless_hrs}, moonless_mins={moonless_mins}")
 
@@ -345,14 +231,14 @@ def compute_day_details(lat, lon, start_date, end_date, moon_affect, step_minute
                 m_set_str = dt_loc.strftime("%H:%M")
             prev_alt = moon_alts[i]
 
-        # Moon phase at local noon
+        # Moon phase
         local_noon = datetime(current.year, current.month, current.day, 12, 0, 0)
         try:
-            local_noon_aware = local_tz.localize(local_noon, is_dst=None)
+            noon_aware = local_tz.localize(local_noon, is_dst=None)
         except Exception as e:
             debug_print(f"Noon tz error: {e}")
-            local_noon_aware = pytz.utc.localize(local_noon)
-        noon_utc = local_noon_aware.astimezone(pytz.utc)
+            noon_aware = pytz.utc.localize(local_noon)
+        noon_utc = noon_aware.astimezone(pytz.utc)
         t_noon = ts.from_datetime(noon_utc)
         obs_noon = observer.at(t_noon)
         sun_ecl = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
@@ -401,30 +287,25 @@ def main():
 
     LOCATIONIQ_TOKEN = st.secrets["locationiq"]["token"]
 
-    # Inputs row
     st.markdown("#### Inputs")
     input_cols = st.columns(3)
     with input_cols[0]:
         if USE_CITY_SEARCH:
-            cval = st.text_input(
-                "City (optional)",
-                value=st.session_state["city"],
-                help="Enter a city name to look up lat/lon from LocationIQ."
-            )
+            cval = st.text_input("City (optional)",
+                                 value=st.session_state["city"],
+                                 help="Enter a city name to look up lat/lon.")
             if cval != st.session_state["city"]:
                 coords = geocode_city(cval, LOCATIONIQ_TOKEN)
                 if coords:
                     st.session_state["lat"], st.session_state["lon"] = coords
                     st.session_state["city"] = cval
                 else:
-                    st.warning("City not found or blocked.")
+                    st.warning("City not found.")
         else:
             st.write("City search is OFF")
 
     with input_cols[1]:
         st.markdown("**Select Date Range**")
-
-        # Convert existing st.session_state dates to datetime for the widget
         dstart_dt = datetime.combine(st.session_state["selected_dates"][0], datetime.min.time())
         dend_dt   = datetime.combine(st.session_state["selected_dates"][1], datetime.min.time())
 
@@ -436,7 +317,7 @@ def main():
         )
 
         if date_range_res:
-            d_start_str, d_end_str = date_range_res  # both strings
+            d_start_str, d_end_str = date_range_res  # strings
             d_start_dt = datetime.fromisoformat(d_start_str)
             d_end_dt   = datetime.fromisoformat(d_end_str)
             st.session_state["selected_dates"] = [d_start_dt.date(), d_end_dt.date()]
@@ -456,44 +337,34 @@ def main():
             help="Higher = faster but less precise; lower = more accurate but slower."
         )
 
-    # Coordinates & Moon Influence
     st.markdown("#### Coordinates & Moon Influence")
     coord_cols = st.columns(3)
     with coord_cols[0]:
-        lat_in = st.number_input(
-            "Latitude",
-            value=st.session_state["lat"],
-            format="%.6f",
-            min_value=-90.0,
-            max_value=90.0,
-            help="Latitude in decimal degrees."
-        )
+        lat_in = st.number_input("Latitude",
+                                 value=st.session_state["lat"],
+                                 format="%.6f",
+                                 min_value=-90.0,
+                                 max_value=90.0)
         if abs(lat_in - st.session_state["lat"]) > 1e-8:
             st.session_state["lat"] = lat_in
 
     with coord_cols[1]:
-        lon_in = st.number_input(
-            "Longitude",
-            value=st.session_state["lon"],
-            format="%.6f",
-            min_value=-180.0,
-            max_value=180.0,
-            help="Longitude in decimal degrees."
-        )
+        lon_in = st.number_input("Longitude",
+                                 value=st.session_state["lon"],
+                                 format="%.6f",
+                                 min_value=-180.0,
+                                 max_value=180.0)
         if abs(lon_in - st.session_state["lon"]) > 1e-8:
             st.session_state["lon"] = lon_in
 
     with coord_cols[2]:
         moon_options = ["Include Moonlight", "Ignore Moonlight"]
-        moon_affect = st.selectbox(
-            "Moon Influence on Darkness",
-            options=moon_options,
-            index=0
-        )
+        moon_affect = st.selectbox("Moon Influence on Darkness",
+                                   options=moon_options,
+                                   index=0)
 
-    # Map
     st.markdown("#### Select Location on Map")
-    st.markdown("<h5>You may need to click the map twice to register a new location.</h5>", unsafe_allow_html=True)
+    st.markdown("<h5>You may need to click the map twice.</h5>", unsafe_allow_html=True)
     with st.expander("View Map"):
         folium_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=10)
         folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Location").add_to(folium_map)
@@ -518,7 +389,6 @@ def main():
                         st.warning("City not found for that location.")
                     st.session_state["last_click"] = current_click
 
-    # Calculate Button, Progress bar
     st.markdown("####")
     calculate_button = st.button("Calculate")
 
@@ -526,20 +396,16 @@ def main():
     progress_bar = progress_placeholder.progress(0)
     progress_text = st.empty()
 
-    # Progress Console
     st.markdown("#### Progress Console")
     console_placeholder = st.empty()
-    console_placeholder.text_area(
-        "Progress Console",
-        value=st.session_state["progress_console"],
-        height=150,
-        max_chars=None,
-        key="progress_console_display",
-        disabled=True,
-        label_visibility="collapsed"
-    )
+    console_placeholder.text_area("Progress Console",
+                                  value=st.session_state["progress_console"],
+                                  height=150,
+                                  max_chars=None,
+                                  key="progress_console_display",
+                                  disabled=True,
+                                  label_visibility="collapsed")
 
-    # Day range
     sel_dates = st.session_state["selected_dates"]
     if len(sel_dates) >= 2:
         start_d, end_d = sel_dates[:2]
@@ -551,7 +417,6 @@ def main():
         st.error(f"Please pick {MAX_DAYS} days or fewer.")
         st.stop()
 
-    # Calculate
     if calculate_button:
         if start_d > end_d:
             st.error("Start date must be <= end date.")
@@ -589,10 +454,9 @@ def main():
         progress_text.text("Calculations completed.")
 
         if not daily_data:
-            st.warning("No data? Possibly 0-day range or an error.")
+            st.warning("No data?? Possibly 0-day range or an error.")
             st.stop()
 
-        # Summation
         total_astro = 0
         total_moonless = 0
         for d in daily_data:
@@ -600,9 +464,8 @@ def main():
             a_h, a_m = int(astro_parts[0]), int(astro_parts[2])
             moonless_parts = d["moonless_hours"].split()
             m_h, m_m = int(moonless_parts[0]), int(moonless_parts[2])
-
-            total_astro += a_h * 60 + a_m
-            total_moonless += m_h * 60 + m_m
+            total_astro += a_h*60 + a_m
+            total_moonless += m_h*60 + m_m
 
         total_astro_hours = total_astro // 60
         total_astro_minutes = total_astro % 60
@@ -627,7 +490,7 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            empty_col1, main_col, empty_col2 = st.columns([1,8,1])
+            empty_col1, main_col, empty_col2 = st.columns([1, 8, 1])
             with main_col:
                 st.markdown(f"""
                 <div class="result-box">
@@ -654,3 +517,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#
+# FINAL forced injection of dark-themed CSS after everything else
+#
+st.markdown(
+    \"\"\"
+    <style>
+    /* Put extremely specific or !important rules here so they override any re-injected defaults. */
+    body .ant-picker-dropdown,
+    body .ant-picker-panel-container,
+    body .ant-picker-panel {
+        background-color: #202123 !important;
+        color: #E8EAED !important;
+        border: 1px solid #555 !important;
+        width: 400px !important;
+        min-width: 400px !important;
+        min-height: 420px !important;
+    }
+
+    body .ant-picker-cell-inner {
+        color: #E8EAED !important;
+    }
+    body .ant-picker-cell-inner:hover,
+    body .ant-picker-cell-selected .ant-picker-cell-inner {
+        background-color: #3A3B3C !important;
+        color: #FFF !important;
+    }
+    </style>
+    \"\"\",
+    unsafe_allow_html=True
+)
