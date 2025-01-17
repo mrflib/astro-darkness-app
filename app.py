@@ -334,7 +334,7 @@ def main():
 
     with input_cols[1]:
         # Date Range Selector bound to 'selected_dates'
-        st.date_input(
+        dvals = st.date_input(
             f"Pick up to {MAX_DAYS} days",
             value=st.session_state["selected_dates"],
             key="selected_dates",
@@ -437,99 +437,98 @@ def main():
 
         if isinstance(dvals, (list, tuple)):
             if len(dvals) == 1:
-                st.session_state["start_date"] = dvals[0]
-                st.session_state["end_date"] = dvals[0]
+                start_date = dvals[0]
+                end_date = dvals[0]
             elif len(dvals) == 2:
-                start, end = dvals
-                delta_days = (end - start).days + 1
-                if delta_days > MAX_DAYS:
-                    adjusted_end = start + timedelta(days=MAX_DAYS -1)
-                    st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
-                    st.session_state["start_date"] = start
-                    st.session_state["end_date"] = adjusted_end
-                elif start > end:
-                    st.warning("Start date must be before or equal to end date.")
-                else:
-                    st.session_state["start_date"], st.session_state["end_date"] = start, end
+                start_date, end_date = dvals
             else:
                 st.warning("Please select either a single date or a valid date range.")
+                st.stop()
+        elif isinstance(dvals, date):
+            start_date = dvals
+            end_date = dvals
         else:
-            if isinstance(dvals, date):
-                st.session_state["start_date"] = dvals
-                st.session_state["end_date"] = dvals
-            else:
-                st.warning("Please select either a single date or a valid date range.")
-
-        # Recalculate delta_days after updating dates
-        delta_days = (st.session_state["end_date"] - st.session_state["start_date"]).days + 1
-        if delta_days > MAX_DAYS:
-            st.error(f"Please pick {MAX_DAYS} days or fewer.")
+            st.warning("Please select either a single date or a valid date range.")
             st.stop()
 
-        if st.session_state["start_date"] > st.session_state["end_date"]:
+        # Validate date range
+        if start_date > end_date:
             st.error("Start date must be <= end date.")
             st.stop()
 
-        # Reset console
-        st.session_state["progress_console"] = ""
+        delta_days = (end_date - start_date).days + 1
 
-        # Convert step_minutes selection to integer
-        step_min = step_options[step_minutes]
+        if delta_days > MAX_DAYS:
+            adjusted_end = start_date + timedelta(days=MAX_DAYS - 1)
+            st.warning(f"Selected range exceeds {MAX_DAYS} days. Adjusting the end date to {adjusted_end}.")
+            end_date = adjusted_end
 
-        # Start Progress Bar
-        progress_bar.progress(0)
-        progress_text.text("Starting calculations...")
+        # Set 'start_date' and 'end_date'
+        st.session_state["start_date"] = start_date
+        st.session_state["end_date"] = end_date
 
-        # Perform calculations with real-time updates
-        daily_data = compute_day_details(
-            st.session_state["lat"],
-            st.session_state["lon"],
-            st.session_state["start_date"],
-            st.session_state["end_date"],
-            moon_affect,
-            step_min,
-            progress_bar
-        )
+        # Proceed only if date range is valid
+        if (start_date <= end_date) and (delta_days <= MAX_DAYS):
+            # Reset console
+            st.session_state["progress_console"] = ""
 
-        # Final update to progress bar
-        progress_bar.progress(100)
-        progress_text.text("Calculations completed.")
+            # Convert step_minutes selection to integer
+            step_min = step_options[step_minutes]
 
-        if not daily_data:
-            st.warning("No data?? Possibly 0-day range or an error.")
-            st.stop()
+            # Start Progress Bar
+            progress_bar.progress(0)
+            progress_text.text("Starting calculations...")
 
-        total_astro = sum(d["astro_dark_hours"] for d in daily_data)
-        total_moonless = sum(d["moonless_hours"] for d in daily_data)
-
-        st.markdown("#### Results")
-        result_cols = st.columns(2)
-        with result_cols[0]:
-            st.markdown(
-                f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
-                unsafe_allow_html=True
-            )
-        with result_cols[1]:
-            st.markdown(
-                f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
-                unsafe_allow_html=True
+            # Perform calculations with real-time updates
+            daily_data = compute_day_details(
+                st.session_state["lat"],
+                st.session_state["lon"],
+                st.session_state["start_date"],
+                st.session_state["end_date"],
+                moon_affect,
+                step_min,
+                progress_bar
             )
 
-        st.markdown("#### Day-by-Day Breakdown")
-        df = pd.DataFrame(daily_data)
-        df = df.rename(columns={
-            "date": "Date",
-            "astro_dark_hours": "Astro (hrs)",
-            "moonless_hours": "Moonless (hrs)",
-            "dark_start": "Dark Start",
-            "dark_end": "Dark End",
-            "moon_rise": "Moonrise",
-            "moon_set": "Moonset",
-            "moon_phase": "Phase"
-        })
-        # Remove row index by resetting index and dropping it
-        df.reset_index(drop=True, inplace=True)
-        st.dataframe(df)
+            # Final update to progress bar
+            progress_bar.progress(100)
+            progress_text.text("Calculations completed.")
+
+            if not daily_data:
+                st.warning("No data?? Possibly 0-day range or an error.")
+                st.stop()
+
+            total_astro = sum(d["astro_dark_hours"] for d in daily_data)
+            total_moonless = sum(d["moonless_hours"] for d in daily_data)
+
+            st.markdown("#### Results")
+            result_cols = st.columns(2)
+            with result_cols[0]:
+                st.markdown(
+                    f"<h3 style='text-align: center; color: green;'><b>Total Astronomical Darkness:</b> {total_astro:.2f} hrs</h3>",
+                    unsafe_allow_html=True
+                )
+            with result_cols[1]:
+                st.markdown(
+                    f"<h3 style='text-align: center; color: green;'><b>Moonless Darkness:</b> {total_moonless:.2f} hrs</h3>",
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("#### Day-by-Day Breakdown")
+            df = pd.DataFrame(daily_data)
+            df = df.rename(columns={
+                "date": "Date",
+                "astro_dark_hours": "Astro (hrs)",
+                "moonless_hours": "Moonless (hrs)",
+                "dark_start": "Dark Start",
+                "dark_end": "Dark End",
+                "moon_rise": "Moonrise",
+                "moon_set": "Moonset",
+                "moon_phase": "Phase"
+            })
+            # Remove row index by resetting index and dropping it
+            df.reset_index(drop=True, inplace=True)
+            st.dataframe(df)
 
 # Run the app
 if __name__=="__main__":
