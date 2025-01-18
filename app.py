@@ -190,6 +190,7 @@ def compute_night_details(
         day_label = start_date + timedelta(days=i)
         debug_print(f"Processing 'Night of {day_label}' (noon->noon).")
 
+        # Local noon for day_label -> next day
         local_noon_dt = datetime(day_label.year, day_label.month, day_label.day, 12, 0, 0)
         try:
             local_noon_aware = local_tz.localize(local_noon_dt, is_dst=None)
@@ -231,21 +232,26 @@ def compute_night_details(
         moon_set   = "-"
 
         for idx in range(len(sun_alts)-1):
+            # crossing from >= -th to < -th => dark start
             if sun_alts[idx] >= -twilight_threshold and sun_alts[idx+1] < -twilight_threshold and dark_start == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 dark_start = dt_loc.strftime("%H:%M")
+            # crossing from < -th to >= -th => dark end
             if sun_alts[idx] < -twilight_threshold and sun_alts[idx+1] >= -twilight_threshold and dark_end == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 dark_end = dt_loc.strftime("%H:%M")
 
         for idx in range(len(moon_alts)-1):
+            # crossing from <0 to >=0 => moon rise
             if moon_alts[idx] < 0.0 and moon_alts[idx+1] >= 0.0 and moon_rise == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 moon_rise = dt_loc.strftime("%H:%M")
+            # crossing from >=0 to <0 => moon set
             if moon_alts[idx] >= 0.0 and moon_alts[idx+1] < 0.0 and moon_set == "-":
                 dt_loc = times_list[idx+1].utc_datetime().astimezone(local_tz)
                 moon_set = dt_loc.strftime("%H:%M")
 
+        # Format sums
         a_hrs = astro_minutes // 60
         a_min = astro_minutes % 60
         astro_str = f"{a_hrs}hrs {a_min}min"
@@ -254,7 +260,7 @@ def compute_night_details(
         m_min = moonless_minutes % 60
         moonl_str = f"{m_hrs}hrs {m_min}min"
 
-        # moon phase
+        # Moon phase
         t_noon = ts.from_datetime(local_noon_aware.astimezone(pytz.utc))
         obs_noon = observer.at(t_noon)
         sun_ecl  = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
@@ -279,9 +285,24 @@ def compute_night_details(
 # MAIN
 ########################################
 def main():
+    # --- Initialize session state keys at the very top (fixes KeyError) ---
+    if "city" not in st.session_state:
+        st.session_state["city"] = "Marrakech"
+    if "lat" not in st.session_state:
+        st.session_state["lat"] = 31.6258
+    if "lon" not in st.session_state:
+        st.session_state["lon"] = -7.9892
+    if "dates_range" not in st.session_state:
+        st.session_state["dates_range"] = (date.today(), date.today() + timedelta(days=1))
+    if "progress_console" not in st.session_state:
+        st.session_state["progress_console"] = ""
+    if "last_map_click" not in st.session_state:
+        st.session_state["last_map_click"] = None
+    # ---------------------------------------------------------------------
+
     st.title("Astronomical Darkness Calculator")
 
-    # Friendly explanation about the app (why it's good for astro holiday planning)
+    # Friendly explanation
     st.write("""This tool calculates how many hours of proper darkness you get each night, 
     factoring in the Sun’s altitude and the Moon’s position. 
     It’s ideal for planning astronomy trips or holidays, 
@@ -289,12 +310,10 @@ def main():
     Simply choose your location (via city or map or lat/lon) and your date range. 
     Then hit **Calculate** and we’ll do the rest.""")
 
-    # Coordinates & City Input section
+    # Coordinates & City Input
     st.markdown("#### Coordinates & City Input")
     st.write("Either enter a city, lat/long, or click the map, then pick date range & press Calculate.")
-    # (Now the user can see the line here, above the city/lat/lon boxes.)
 
-    # Rows for city, lat, lon
     rowc = st.columns(3)
     with rowc[0]:
         cval = st.text_input(
@@ -339,7 +358,10 @@ def main():
     st.markdown("#### Location on Map")
     st.write("You may need to click the map a few times to make it work! Free API fun! :)")
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
-    folium.Marker([st.session_state["lat"], st.session_state["lon"]], popup="Current").add_to(fol_map)
+    folium.Marker(
+        [st.session_state["lat"], st.session_state["lon"]], 
+        popup="Current"
+    ).add_to(fol_map)
     map_out = st_folium(fol_map, width=700, height=450)
     if map_out and "last_clicked" in map_out and map_out["last_clicked"]:
         clat = map_out["last_clicked"]["lat"]
@@ -358,7 +380,6 @@ def main():
 
     # Next row: Calculation form
     st.markdown("### Calculate Darkness")
-    # Additional explanation of how we do sun & moon locally
     st.write("""Under the hood, we calculate Sun & Moon altitudes at each time step—no paid external API needed!
     This can take a bit longer for large date ranges, so please be patient while the progress bar updates.""")
 
@@ -371,7 +392,6 @@ def main():
                 help="Select a start & end date. We label each day from local noon→next noon."
             )
         with row2[1]:
-            # Twilight thresholds with ° symbol
             threshold_opts = {
                 "Civil (−6°)": 6,
                 "Nautical (−12°)": 12,
@@ -392,8 +412,8 @@ def main():
                 options=step_opts,
                 index=0,
                 help="""How finely we check the Sun & Moon alt.
-- 1 min => ~1440 calculations/day (very precise, can be slow). Moon and Sun calculated to the minute.
-- 15 min => 96 calculations/day (faster, less detail). Moon and Sun calculated to the 15 minute (good for quick checks).
+- 1 min => ~1440 calculations/day (very precise, can be slow).
+- 15 min => 96 calculations/day (faster, less detail).
 """
             )
             step_minutes = int(step_str)
@@ -423,7 +443,6 @@ def main():
         pbar_placeholder = st.empty()
         pbar = pbar_placeholder.progress(0)
 
-        # Calculate
         nights_data = compute_night_details(
             st.session_state["lat"],
             st.session_state["lon"],
@@ -442,13 +461,11 @@ def main():
         total_astro_min = 0
         total_moonless_min = 0
         for rowd in nights_data:
-            # parse "Dark Hours" => "6hrs 32min"
             d_hrs_str = rowd["Dark Hours"].split("hrs")[0].strip()
             d_min_str = rowd["Dark Hours"].split("hrs")[1].replace("min","").strip()
             d_hrs = int(d_hrs_str)
             d_m   = int(d_min_str)
 
-            # parse "Moonless Hours" => "3hrs 15min"
             m_hrs_str = rowd["Moonless Hours"].split("hrs")[0].strip()
             m_min_str = rowd["Moonless Hours"].split("hrs")[1].replace("min","").strip()
             m_hrs = int(m_hrs_str)
@@ -457,7 +474,6 @@ def main():
             total_astro_min += (d_hrs*60 + d_m)
             total_moonless_min += (m_hrs*60 + m_m)
 
-        # Display results
         st.markdown("#### Results")
         box_cols = st.columns(2)
         with box_cols[0]:
