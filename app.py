@@ -18,6 +18,7 @@ import folium
 from streamlit_folium import st_folium
 from skyfield.api import load, Topos
 import pandas as pd
+import math  # For cos(), radians()
 
 ########################################
 # PAGE CONFIG + Custom CSS
@@ -90,7 +91,10 @@ def debug_print(msg: str):
         st.session_state["progress_console"] += msg + "\n"
 
 def moon_phase_icon(phase_deg):
-    """Return a Moon phase emoji."""
+    """
+    Return a Moon phase emoji based on the approximate angle from new moon.
+    0 => new, 180 => full, 360 => new
+    """
     x = phase_deg % 360
     if x < 22.5 or x >= 337.5:
         return "🌑"
@@ -108,6 +112,16 @@ def moon_phase_icon(phase_deg):
         return "🌗"
     else:
         return "🌘"
+
+def moon_percent_illum(phase_deg):
+    """
+    Approximate percent of full moon from phase angle in degrees.
+    Typical formula: fraction = 0.5 * (1 - cos(phaseAngle_in_radians))
+    Then multiply by 100 to get percent.
+    """
+    radians = math.radians(phase_deg)
+    fraction = 0.5 * (1 - math.cos(radians))
+    return fraction * 100.0
 
 def geocode_city(city_name, token):
     """City -> (lat, lon) using LocationIQ /v1/search. Returns None if not found."""
@@ -161,6 +175,7 @@ def compute_night_details(
     """
     For each local day in [start_date, end_date], label it "Night of D" (noon->noon).
     We track times sun < -twilight_threshold, plus moon < 0 => "moonless."
+    We also compute a "Moon %" approx using the fraction illuminated formula.
     We update 'pbar' each day with a short time.sleep to allow partial increments visually.
     """
     from skyfield.api import load, Topos
@@ -260,13 +275,17 @@ def compute_night_details(
         m_min = moonless_minutes % 60
         moonl_str = f"{m_hrs}hrs {m_min}min"
 
-        # Moon phase
+        # Moon phase angle => fraction illuminated
         t_noon = ts.from_datetime(local_noon_aware.astimezone(pytz.utc))
         obs_noon = observer.at(t_noon)
         sun_ecl  = obs_noon.observe(eph['Sun']).apparent().ecliptic_latlon()
         moon_ecl = obs_noon.observe(eph['Moon']).apparent().ecliptic_latlon()
         phase_angle = (moon_ecl[1].degrees - sun_ecl[1].degrees) % 360
         phase_emoji = moon_phase_icon(phase_angle)
+
+        # Approx fraction of full
+        fraction_ill = moon_percent_illum(phase_angle)  # 0..100
+        fraction_str = f"{fraction_ill:.0f}%"
 
         nights_data.append({
             "Night": day_label.strftime("%Y-%m-%d"),
@@ -276,7 +295,8 @@ def compute_night_details(
             "Moon Set": moon_set,
             "Dark Hours": astro_str,
             "Moonless Hours": moonl_str,
-            "Phase": phase_emoji
+            "Phase": phase_emoji,
+            "Moon %": fraction_str
         })
 
     return nights_data
@@ -512,14 +532,19 @@ so smaller steps are more precise but slower.
             """, unsafe_allow_html=True)
 
         st.markdown("#### Night-by-Night Breakdown")
+
+        # Convert to DataFrame and remove index. Also includes "Moon %" now.
         df = pd.DataFrame(nights_data)
+
+        # We'll remove the index by setting index=False in to_html
         styled = df.style.set_properties(**{"text-align": "center"})
         styled.set_table_styles([
             {"selector": "th", "props": [("text-align","center")]},
             {"selector": "td", "props": [("text-align","center")]},
             {"selector": "table", "props": [("margin","0 auto")]}
         ])
-        st.markdown(styled.to_html(index=True), unsafe_allow_html=True)
+
+        st.markdown(styled.to_html(index=False), unsafe_allow_html=True)
 
         st.markdown("#### Progress Console")
         st.text_area(
