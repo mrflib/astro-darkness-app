@@ -384,7 +384,9 @@ def main():
 
     # We've appended the 'Suggested approach' bullet points here:
     st.write("""Under the hood, we calculate Sun & Moon altitudes at each time step—no paid external API needed!
-    This can take a bit longer for large date ranges, so please be patient while the progress bar updates.
+    This can take a bit longer for large date ranges, so please be patient while the progress bar updates. As an
+    example, a fine step time such as 1 min will deliver the precise moon rise or sun rise time e.g. 07:16. A larger
+    step time, such as 30 mins checks to the nearest half hour, so instead of seeing 07:16, you'd see 07:30.
 
 **Suggested approach**:
 - Start with a **larger step** (e.g., 15 or 30 min) to quickly scout many days or find roughly which nights are darkest.
