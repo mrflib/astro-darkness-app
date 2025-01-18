@@ -24,7 +24,7 @@ import pandas as pd
 ########################################
 st.set_page_config(
     page_title="Astronomical Darkness Calculator",
-    page_icon="🌑",
+    page_icon="🌗",
     layout="centered"
 )
 
@@ -356,7 +356,6 @@ def main():
 
     # Map
     st.markdown("#### Location on Map")
-    # Here we just use a simple warning:
     st.warning("You may need to click the map a few times to make it work! Free API fun! :)")
 
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
@@ -382,8 +381,15 @@ def main():
 
     # Next row: Calculation form
     st.markdown("### Calculate Darkness")
+
+    # We've appended the 'Suggested approach' bullet points here:
     st.write("""Under the hood, we calculate Sun & Moon altitudes at each time step—no paid external API needed!
-    This can take a bit longer for large date ranges, so please be patient while the progress bar updates.""")
+    This can take a bit longer for large date ranges, so please be patient while the progress bar updates.
+
+**Suggested approach**:
+- Start with a **larger step** (e.g., 15 or 30 min) to quickly scout many days or find roughly which nights are darkest.
+- Then **dial down** to 1 or 2 min if you want more precise moonrise/sunrise times once you’ve narrowed your date range.
+""")
 
     with st.form("calc_form"):
         row2 = st.columns(3)
@@ -413,23 +419,15 @@ def main():
                 "Time Step (Mins)",
                 options=step_opts,
                 index=0,
-                help="""How finely we calculate the Sun & Moon altitudes each day from local noon to next local noon.
+                help="""We calculate Sun & Moon altitudes at each step, 
+so smaller steps are more precise but slower.
 
-- **1 min** => ~1440 checks/day (very precise): 
-  If sunrise is ~05:32, you'll see ~05:32 exactly. Great for short date ranges, but slow for large ones.
-- **15 min** => ~96 checks/day (faster, less detail):
-  Times like sunrise might appear 05:15 or 05:30 instead of the exact minute.
-- **30 min** => ~48 checks/day (even faster, but more approximate).
-
-**Suggested approach**:
-- Start with a larger step (e.g., 15 or 30 min) to quickly scout many days or find roughly which nights are darkest.
-- Then dial down to 1 or 2 min if you want more precise moonrise/sunrise times once you’ve narrowed your date range.
-
-No paid external API is used, so be patient on big date ranges!
+- 1 min => ~1440 checks/day
+- 15 min => ~96 checks/day
+- 30 min => ~48 checks/day
 """
             )
             step_minutes = int(step_str)
-
 
         calc_btn = st.form_submit_button("Calculate")
 
