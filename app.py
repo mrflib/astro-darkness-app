@@ -413,12 +413,23 @@ def main():
                 "Time Step (Mins)",
                 options=step_opts,
                 index=0,
-                help="""How finely we calculate the Sun & Moon. 
-- 1 min => ~1440 calculations/day (precise).
-- 15 min => ~96 calculations/day (faster, less detail).
+                help="""How finely we calculate the Sun & Moon altitudes each day from local noon to next local noon.
+
+- **1 min** => ~1440 checks/day (very precise): 
+  If sunrise is ~05:32, you'll see ~05:32 exactly. Great for short date ranges, but slow for large ones.
+- **15 min** => ~96 checks/day (faster, less detail):
+  Times like sunrise might appear 05:15 or 05:30 instead of the exact minute.
+- **30 min** => ~48 checks/day (even faster, but more approximate).
+
+**Suggested approach**:
+- Start with a larger step (e.g., 15 or 30 min) to quickly scout many days or find roughly which nights are darkest.
+- Then dial down to 1 or 2 min if you want more precise moonrise/sunrise times once you’ve narrowed your date range.
+
+No paid external API is used, so be patient on big date ranges!
 """
             )
             step_minutes = int(step_str)
+
 
         calc_btn = st.form_submit_button("Calculate")
 
