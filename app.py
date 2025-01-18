@@ -382,16 +382,19 @@ def main():
     # Next row: Calculation form
     st.markdown("### Calculate Darkness")
 
-    # We've appended the 'Suggested approach' bullet points here:
+    # Explanation plus "Suggested approach" in an expander:
     st.write("""Under the hood, we calculate Sun & Moon altitudes at each time step—no paid external API needed!
-    This can take a bit longer for large date ranges, so please be patient while the progress bar updates. As an
-    example, a fine step time such as 1 min will deliver the precise moon rise or sun rise time e.g. 07:16. A larger
-    step time, such as 30 mins checks to the nearest half hour, so instead of seeing 07:16, you'd see 07:30.
-
-**Suggested approach**:
+    This can take a bit longer for large date ranges, so please be patient while the progress bar updates.
+    As an example, a 1-min step might find sunrise exactly at 07:16, whereas a 30-min step might show 07:30 instead.
+""")
+    with st.expander("Suggested approach"):
+        st.write("""
 - Start with a **larger step** (e.g., 15 or 30 min) to quickly scout many days or find roughly which nights are darkest.
 - Then **dial down** to 1 or 2 min if you want more precise moonrise/sunrise times once you’ve narrowed your date range.
 """)
+
+    # Optional small spacer:
+    st.write("")
 
     with st.form("calc_form"):
         row2 = st.columns(3)
