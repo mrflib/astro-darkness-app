@@ -356,22 +356,8 @@ def main():
 
     # Map
     st.markdown("#### Location on Map")
-    # Here is the custom-styled box
-    st.markdown(
-        """
-<div style="
-    background-color: #FFF3CD; 
-    padding: 10px; 
-    border-radius: 5px; 
-    border: 1px solid #FFEEBA;
-    margin-bottom: 1rem;">
-  <p style="color: #856404; font-weight: bold;">
-    You may need to click the map a few times to make it work! Free API fun! :)
-  </p>
-</div>
-""",
-        unsafe_allow_html=True
-    )
+    # Here we just use a simple warning:
+    st.warning("You may need to click the map a few times to make it work! Free API fun! :)")
 
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
     folium.Marker(
