@@ -411,7 +411,10 @@ def main():
                 "Time Step (Mins)",
                 options=step_opts,
                 index=0,
-                help="""How finely we calculate the Sun & Moon rise/set times.\n In essence, choose 1 min for exact timings of rise and set, 5 mins to be within 5 mins of rise/set.
+                help="""How finely we calculate the Sun & Moon rise/set times. 
+                In essence, choose 1 min for exact timings of rise and set, 5 mins to be within 5 mins of rise/set (ballpark timings).
+                For large date ranges or quick scanning, choose something like 15 minutes, and drill down to 1 minute when you have
+                your rough dates and location sorted.
 - 1 min => ~1440 calculations/day (very precise, can be slow).
 - 15 min => 96 calculations/day (faster, less detail).
 """
