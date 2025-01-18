@@ -356,7 +356,23 @@ def main():
 
     # Map
     st.markdown("#### Location on Map")
-    st.write("You may need to click the map a few times to make it work! Free API fun! :)")
+    # Here is the custom-styled box
+    st.markdown(
+        """
+<div style="
+    background-color: #FFF3CD; 
+    padding: 10px; 
+    border-radius: 5px; 
+    border: 1px solid #FFEEBA;
+    margin-bottom: 1rem;">
+  <p style="color: #856404; font-weight: bold;">
+    You may need to click the map a few times to make it work! Free API fun! :)
+  </p>
+</div>
+""",
+        unsafe_allow_html=True
+    )
+
     fol_map = folium.Map(location=[st.session_state["lat"], st.session_state["lon"]], zoom_start=6)
     folium.Marker(
         [st.session_state["lat"], st.session_state["lon"]], 
@@ -411,12 +427,9 @@ def main():
                 "Time Step (Mins)",
                 options=step_opts,
                 index=0,
-                help="""How finely we calculate the Sun & Moon rise/set times. 
-                In essence, choose 1 min for exact timings of rise and set, 5 mins to be within 5 mins of rise/set (ballpark timings).
-                For large date ranges or quick scanning, choose something like 15 minutes, and drill down to 1 minute when you have
-                your rough dates and location sorted.
-- 1 min => ~1440 calculations/day (very precise, can be slow).
-- 15 min => 96 calculations/day (faster, less detail).
+                help="""How finely we calculate the Sun & Moon. 
+- 1 min => ~1440 calculations/day (precise).
+- 15 min => ~96 calculations/day (faster, less detail).
 """
             )
             step_minutes = int(step_str)
